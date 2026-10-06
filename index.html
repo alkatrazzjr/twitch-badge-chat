@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Чат трансляции</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <main class="player">
+    <div class="offline">
+      <div class="offline-tag">НЕ В СЕТИ</div>
+      <div class="offline-name" id="channelTitle"></div>
+      <div class="offline-sub">Тестовая имитация чата Twitch для проверки значков канала</div>
+    </div>
+  </main>
+
+  <aside class="chat" aria-label="Чат трансляции">
+    <header class="chat-header">
+      <button class="icon-btn" id="collapseBtn" title="Свернуть чат" aria-label="Свернуть чат">
+        <svg viewBox="0 0 20 20" width="20" height="20"><path fill="currentColor" d="M4 16V4H2v12h2zM13 15l-1.5-1.5L14 11H6V9h8l-2.5-2.5L13 5l5 5-5 5z"/></svg>
+      </button>
+      <h1>Чат трансляции</h1>
+      <button class="icon-btn" id="usersBtn" title="Пользователи в чате" aria-label="Пользователи в чате">
+        <svg viewBox="0 0 20 20" width="20" height="20"><path fill="currentColor" fill-rule="evenodd" d="M7 2a4 4 0 100 8 4 4 0 000-8zM5 6a2 2 0 114 0 2 2 0 01-4 0zm-3 10a5 5 0 0110 0v2h2v-2a7 7 0 00-14 0v2h2v-2zm11.5-3.5L15 11l2 2 3-3-1.5-1.5L17 10l-.5-.5zM14 4h4v2h-4z" clip-rule="evenodd"/></svg>
+      </button>
+    </header>
+
+    <div class="chat-scroll" id="chatScroll">
+      <div class="chat-welcome" id="welcome"></div>
+      <div id="messages" role="log" aria-live="polite"></div>
+    </div>
+    <button class="more-msgs" id="moreBtn" hidden>Чат приостановлен — прокрутите вниз</button>
+
+    <div class="chat-input-wrap">
+      <!-- Identity card popover -->
+      <section class="popover identity" id="identity" hidden aria-label="Имя в чате">
+        <div class="pop-head">
+          <span>Имя в чате</span>
+          <button class="icon-btn" data-close="identity" aria-label="Закрыть">✕</button>
+        </div>
+        <div class="pop-body">
+          <h3>Предпросмотр имени в чате</h3>
+          <p class="muted">Как ваше имя будет отображаться в чате на канале <b id="channelName2"></b>:</p>
+          <div class="preview" id="preview"></div>
+
+          <h3>Ник</h3>
+          <input class="field" id="nickInput" maxlength="25" autocomplete="off" spellcheck="false">
+
+          <h3>Роль в канале</h3>
+          <div class="badge-grid" id="roleGrid"></div>
+
+          <h3>Значок канала</h3>
+          <p class="muted">Отображается только на этом канале (подписка, Creator Badge Drops).</p>
+          <div class="badge-grid" id="channelGrid"></div>
+
+          <h3>Общий значок</h3>
+          <p class="muted">Этот значок отображается на всех каналах и в личных сообщениях.</p>
+          <div class="badge-grid" id="globalGrid"></div>
+
+          <h3>Глобальный цвет имени</h3>
+          <p class="muted">Выберите любой цвет! Обновление цвета в комнате чата может занимать несколько минут.</p>
+          <div class="colors" id="colorGrid"></div>
+          <label class="more-colors">
+            <input type="color" id="customColor">
+            <span>Больше цветов</span>
+          </label>
+        </div>
+      </section>
+
+      <!-- Settings menu -->
+      <section class="popover menu" id="settings" hidden aria-label="Настройки чата">
+        <div class="pop-head">
+          <span>Настройки чата</span>
+          <button class="icon-btn" data-close="settings" aria-label="Закрыть">✕</button>
+        </div>
+        <div class="pop-body">
+          <label class="toggle-row"><span>Показывать метки времени</span><input type="checkbox" id="tsToggle"></label>
+          <button class="menu-item" id="openIdentity2">Имя в чате</button>
+          <button class="menu-item" id="openAdmin">Управление значками</button>
+          <button class="menu-item danger" id="clearChat">Очистить чат</button>
+        </div>
+      </section>
+
+      <form class="chat-input" id="chatForm" autocomplete="off">
+        <button type="button" class="input-badge" id="identityBtn" title="Имя в чате" aria-label="Имя в чате"></button>
+        <textarea id="msgInput" rows="1" maxlength="500" placeholder="Отправить сообщение" aria-label="Отправить сообщение"></textarea>
+        <span class="emote-btn" aria-hidden="true">
+          <svg viewBox="0 0 20 20" width="20" height="20"><path fill="currentColor" d="M7 11a1 1 0 100-2 1 1 0 000 2zm7-1a1 1 0 11-2 0 1 1 0 012 0zm-1.4 2.5c-.6.9-1.6 1.5-2.6 1.5s-2-.6-2.6-1.5l-1.6 1.2C6.8 15.1 8.4 16 10 16s3.2-.9 4.2-2.3l-1.6-1.2z"/><path fill="currentColor" fill-rule="evenodd" d="M10 2a8 8 0 100 16 8 8 0 000-16zM4 10a6 6 0 1112 0 6 6 0 01-12 0z" clip-rule="evenodd"/></svg>
+        </span>
+      </form>
+      <div class="chat-actions">
+        <span class="counter" id="counter"></span>
+        <button class="icon-btn" id="settingsBtn" title="Настройки чата" aria-label="Настройки чата">
+          <svg viewBox="0 0 20 20" width="20" height="20"><path fill="currentColor" d="M10 8a2 2 0 100 4 2 2 0 000-4z"/><path fill="currentColor" fill-rule="evenodd" d="M9 2h2a2.01 2.01 0 001.329 1.747l.144.06a2.01 2.01 0 002.161-.336l1.414 1.414a2.01 2.01 0 00-.336 2.161l.06.144A2.01 2.01 0 0018 9v2a2.01 2.01 0 00-1.747 1.329l-.06.144a2.01 2.01 0 00.336 2.161l-1.414 1.414a2.01 2.01 0 00-2.161-.336l-.144.06A2.01 2.01 0 0011 18H9a2.01 2.01 0 00-1.329-1.747l-.144-.06a2.01 2.01 0 00-2.161.336L3.952 15.12a2.01 2.01 0 00.336-2.161l-.06-.144A2.01 2.01 0 002 11V9a2.01 2.01 0 001.747-1.329l.06-.144a2.01 2.01 0 00-.336-2.161L4.88 3.952a2.01 2.01 0 002.161.336l.144-.06A2.01 2.01 0 009 2zm-3 8a4 4 0 108 0 4 4 0 00-8 0z" clip-rule="evenodd"/></svg>
+        </button>
+        <button class="send-btn" form="chatForm" type="submit">Чат</button>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<!-- Badge management (owner only: writes go through the GitHub API with the owner's token) -->
+<dialog class="admin" id="admin">
+  <div class="pop-head">
+    <span>Управление значками</span>
+    <button class="icon-btn" data-close-dialog aria-label="Закрыть">✕</button>
+  </div>
+  <div class="admin-body">
+    <div id="authBox">
+      <p>Добавлять и удалять значки может только владелец репозитория. Изменения сохраняются коммитом в репозиторий
+        <b id="repoLabel"></b> и через ~1 минуту видны всем по ссылке.</p>
+      <p class="muted">Нужен <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a>:
+        доступ только к этому репозиторию, право <b>Contents: Read and write</b>. Токен хранится только в этом браузере.</p>
+      <div class="repo-fields" id="repoFields" hidden>
+        <input class="field" id="repoOwner" placeholder="владелец (github login)">
+        <input class="field" id="repoName" placeholder="репозиторий">
+      </div>
+      <form id="authForm" class="row">
+        <input class="field" id="tokenInput" type="password" placeholder="github_pat_…" autocomplete="off" required>
+        <button class="btn primary">Войти</button>
+      </form>
+    </div>
+
+    <div id="ownerBox" hidden>
+      <div class="row between">
+        <span class="muted">Вошли как <b id="ownerLogin"></b></span>
+        <button class="btn" id="logoutBtn">Выйти</button>
+      </div>
+
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="drop" role="tab">Creator Badge Drop</button>
+        <button class="tab" data-tab="sub" role="tab">Значок подписчика</button>
+        <button class="tab" data-tab="global" role="tab">Общий значок</button>
+      </div>
+
+      <form class="upload" id="form-drop" data-kind="drop">
+        <p class="spec">Требования Twitch: квадратный <b>PNG</b>, <b>без анимации</b>, до <b>25 КБ</b>, рекомендуется от <b>120×120</b>.
+          В событии 1–2 значка: за подписки/подарки (1–5, Prime не считается) и/или за просмотр (1–8 ч). Событие не дольше 28 дней.</p>
+        <label>Событие<input class="field" name="event" required maxlength="60" placeholder="Subathon 2026"></label>
+        <label>Название значка (только латиница и цифры)<input class="field" name="title" required maxlength="25" pattern="[A-Za-z0-9]+" placeholder="Subathon2026"></label>
+        <div class="row">
+          <label>Начало<input class="field" type="date" name="start" required></label>
+          <label>Конец<input class="field" type="date" name="end" required></label>
+        </div>
+        <div class="row">
+          <label>Способ получения
+            <select class="field" name="unlock">
+              <option value="sub">Подписки / подарочные подписки</option>
+              <option value="watch">Время просмотра</option>
+            </select>
+          </label>
+          <label>Количество<select class="field" name="amount"></select></label>
+        </div>
+        <label>Изображение<input class="field" type="file" name="file" accept="image/png" required></label>
+        <div class="check" aria-live="polite"></div>
+        <button class="btn primary">Загрузить значок</button>
+      </form>
+
+      <form class="upload" id="form-sub" data-kind="sub" hidden>
+        <p class="spec">Требования Twitch: <b>PNG</b> с прозрачным фоном, размеры <b>18×18, 36×36, 72×72</b>, каждый до <b>25 КБ</b>.
+          Простая загрузка: один файл 72×72, остальные размеры создаются автоматически.</p>
+        <label>Стаж подписки
+          <select class="field" name="months"></select>
+        </label>
+        <label class="toggle-row"><span>Расширенная загрузка (3 файла)</span><input type="checkbox" name="advanced"></label>
+        <label class="simple">72×72<input class="field" type="file" name="f72" accept="image/png"></label>
+        <div class="advanced" hidden>
+          <label>18×18<input class="field" type="file" name="a18" accept="image/png"></label>
+          <label>36×36<input class="field" type="file" name="a36" accept="image/png"></label>
+          <label>72×72<input class="field" type="file" name="a72" accept="image/png"></label>
+        </div>
+        <div class="check" aria-live="polite"></div>
+        <button class="btn primary">Загрузить значок</button>
+      </form>
+
+      <form class="upload" id="form-global" data-kind="global" hidden>
+        <p class="spec">Для имитации глобальных значков Twitch (их загружает только Twitch). Квадратный PNG, от 18×18, до 100 КБ.</p>
+        <label>Название<input class="field" name="title" required maxlength="40"></label>
+        <label>Описание (необязательно)<input class="field" name="desc" maxlength="80"></label>
+        <label>Изображение<input class="field" type="file" name="file" accept="image/png" required></label>
+        <div class="check" aria-live="polite"></div>
+        <button class="btn primary">Загрузить значок</button>
+      </form>
+
+      <h3>Загруженные значки</h3>
+      <div id="badgeList" class="badge-list"></div>
+    </div>
+    <p class="status" id="adminStatus" aria-live="polite"></p>
+  </div>
+</dialog>
+
+<div class="tooltip" id="tooltip" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
