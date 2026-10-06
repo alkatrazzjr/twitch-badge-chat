@@ -809,9 +809,9 @@ async function bulkImport(fileList) {
   const plan = planImport(files.filter((x) => !x.error));
   if (!plan.length) { status('В выбранных файлах нет PNG', true); return; }
   let added = 0;
+  const own = ownBadges(); // local copy: validates later items against earlier ones without touching `state`
   for (const [i, item] of plan.entries()) {
     status(`Загрузка ${i + 1} из ${plan.length}…`);
-    const own = ownBadges();
     let input;
     if (item.kind === 'sub') {
       const fromName = Number((item.name.match(/\d+/) || [])[0]);
@@ -825,7 +825,7 @@ async function bulkImport(fileList) {
     try {
       const images = Object.fromEntries(Object.entries(input.images).map(([k, b]) => [k, dataUrl(b).split(',')[1]]));
       const badge = await api('/badges', { method: 'POST', body: { ...input, images } });
-      state.badges.push(badge); // keep validation of the next item consistent before the full refresh
+      own.push(badge);
       added++;
       line(true, label);
     } catch (err) { line(false, `${label}: ${err.message}`); }
