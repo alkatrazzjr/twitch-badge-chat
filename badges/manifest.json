@@ -55,18 +55,6 @@
         "x4": "badges/files/drop-muwp8x2hb64j.png"
       },
       "createdAt": "2026-10-06T13:13:24.329Z"
-    },
-    {
-      "id": "sub-muwp90oj208z",
-      "kind": "sub",
-      "months": 6,
-      "title": "Подписчик (6 мес.)",
-      "images": {
-        "x1": "badges/files/sub-muwp90oj208z-18.png",
-        "x2": "badges/files/sub-muwp90oj208z-36.png",
-        "x4": "badges/files/sub-muwp90oj208z-72.png"
-      },
-      "createdAt": "2026-10-06T13:13:29.011Z"
     }
   ]
 }
