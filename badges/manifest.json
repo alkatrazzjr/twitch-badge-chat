@@ -1,5 +1,24 @@
 {
   "version": 1,
   "channel": "AlkatrazzJR",
-  "badges": []
+  "badges": [
+    {
+      "id": "drop-muwowhe6udct",
+      "kind": "drop",
+      "title": "E2Etest",
+      "event": {
+        "name": "E2E",
+        "start": "2026-10-06",
+        "end": "2026-10-13"
+      },
+      "unlock": {
+        "type": "watch",
+        "amount": 4
+      },
+      "images": {
+        "x4": "badges/files/drop-muwowhe6udct.png"
+      },
+      "createdAt": "2026-10-06T13:03:44.142Z"
+    }
+  ]
 }
