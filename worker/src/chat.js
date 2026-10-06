@@ -3,9 +3,16 @@ import { ROLE_SETS, CHANNEL_SETS, IMAGE_KEYS, describe } from '../../rules.js';
 
 const MAX_MESSAGES = 150;            // Twitch keeps roughly this many lines in the chat buffer
 const MAX_TEXT = 500;                // Twitch chat message limit
-const NICK = /^[\p{L}\p{N}_]{3,25}$/u;
+// One script per nick (Latin or Cyrillic) + uniqueness by a confusable "skeleton", so "Аlpha" (Cyrillic А)
+// can't impersonate "Alpha". The channel owner's nick is reserved for the admin key.
+const NICK = /^(?:[A-Za-z0-9_]{3,25}|[А-Яа-яЁё0-9_]{3,25})$/u;
+const CONFUSABLE = { а: 'a', в: 'b', е: 'e', ё: 'e', к: 'k', м: 'm', н: 'h', о: 'o', р: 'p', с: 'c', т: 't', у: 'y', х: 'x', з: '3', ь: 'b', ч: '4', б: '6' };
+const skeleton = (nick) => [...nick.toLowerCase()].map((ch) => CONFUSABLE[ch] ?? ch).join('')
+  .replace(/0/g, 'o').replace(/[1l]/g, 'i').replace(/_/g, '');
+const RESERVED = ['alkatrazzjr', 'admin', 'moderator', 'twitch'].map(skeleton);
+const PROFILE_LIMIT = { windowMs: 3600_000, max: 10 };   // nick/color changes per IP per hour
 const COLOR = /^#[0-9A-Fa-f]{6}$/;
-const RATE = { minGapMs: 300, windowMs: 30_000, maxInWindow: 20 };
+const RATE = { minGapMs: 300, windowMs: 30_000, maxInWindow: 20 }; // per IP, so new browser keys don't reset it
 
 const sha256 = async (text) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))]
   .map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -17,8 +24,16 @@ export class ChatRoom extends DurableObject {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.sql.exec(`CREATE TABLE IF NOT EXISTS users (key_hash TEXT PRIMARY KEY, nick TEXT NOT NULL UNIQUE COLLATE NOCASE, color TEXT NOT NULL)`);
+    try { this.sql.exec('ALTER TABLE users ADD COLUMN skeleton TEXT'); } catch { /* already migrated */ }
+    for (const u of this.sql.exec('SELECT key_hash, nick FROM users WHERE skeleton IS NULL').toArray()) {
+      this.sql.exec('UPDATE users SET skeleton = ? WHERE key_hash = ?', skeleton(u.nick), u.key_hash);
+    }
+    // legacy rows could collide by skeleton; the lookup in profile() still enforces uniqueness for new nicks
+    try { this.sql.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_skeleton ON users(skeleton)'); } catch { /* keep going */ }
+    // persisted so limits survive hibernation; keyed by IP so rotating browser keys doesn't help
+    this.sql.exec('CREATE TABLE IF NOT EXISTS events (ip_hash TEXT NOT NULL, kind TEXT NOT NULL, at INTEGER NOT NULL)');
+    this.sql.exec('CREATE INDEX IF NOT EXISTS events_ip ON events(ip_hash, kind, at)');
     this.sql.exec(`CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, at INTEGER NOT NULL, key_hash TEXT NOT NULL, data TEXT NOT NULL)`);
-    this.rate = new Map();
     this.twitch = null;
   }
 
@@ -26,7 +41,8 @@ export class ChatRoom extends DurableObject {
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('Expected websocket', { status: 426 });
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ keyHash: null, admin: false, base: new URL(req.url).origin });
+    const ipHash = await sha256(`${req.headers.get('CF-Connecting-IP') || ''}:${this.env.ADMIN_KEY}`);
+    server.serializeAttachment({ keyHash: null, admin: false, ipHash, base: new URL(req.url).origin });
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -70,22 +86,31 @@ export class ChatRoom extends DurableObject {
   profile(ws, att, msg) {
     const nick = String(msg.nick || '').trim();
     const color = String(msg.color || '');
-    if (!NICK.test(nick)) return this.send(ws, { type: 'profile', error: 'Ник: 3–25 символов, буквы, цифры и _' });
+    if (!NICK.test(nick)) return this.send(ws, { type: 'profile', error: 'Ник: 3–25 символов — латиница или кириллица (не вперемешку), цифры и _' });
     if (!COLOR.test(color)) return this.send(ws, { type: 'profile', error: 'Неверный цвет' });
-    const owner = this.sql.exec('SELECT key_hash FROM users WHERE nick = ?', nick).toArray()[0];
+    const skel = skeleton(nick);
+    if (!att.admin && RESERVED.includes(skel)) return this.send(ws, { type: 'profile', error: `Ник «${nick}» зарезервирован` });
+    const owner = this.sql.exec('SELECT key_hash FROM users WHERE skeleton = ?', skel).toArray()[0];
     if (owner && owner.key_hash !== att.keyHash) return this.send(ws, { type: 'profile', error: `Ник «${nick}» уже занят` });
-    this.sql.exec('INSERT INTO users (key_hash, nick, color) VALUES (?, ?, ?) ON CONFLICT(key_hash) DO UPDATE SET nick = excluded.nick, color = excluded.color',
-      att.keyHash, nick, color.toUpperCase());
+    const current = this.user(att.keyHash);
+    if (current?.nick === nick && current.color === color.toUpperCase()) return this.send(ws, { type: 'profile', me: current });
+    if (!att.admin && this.limited(att.ipHash, 'profile', PROFILE_LIMIT.windowMs, PROFILE_LIMIT.max)) {
+      return this.send(ws, { type: 'profile', error: 'Слишком много смен ника, попробуйте позже' });
+    }
+    this.sql.exec(`INSERT INTO users (key_hash, nick, color, skeleton) VALUES (?, ?, ?, ?)
+      ON CONFLICT(key_hash) DO UPDATE SET nick = excluded.nick, color = excluded.color, skeleton = excluded.skeleton`,
+    att.keyHash, nick, color.toUpperCase(), skel);
     this.send(ws, { type: 'profile', me: this.user(att.keyHash) });
   }
 
-  limited(keyHash) {
+  // Records the event unless the IP already hit `max` events of this kind within `windowMs` (or posts too fast).
+  limited(ipHash, kind, windowMs, max, minGapMs = 0) {
     const now = Date.now();
-    const times = (this.rate.get(keyHash) || []).filter((t) => now - t < RATE.windowMs);
-    if (times.length && now - times[times.length - 1] < RATE.minGapMs) return true;
-    if (times.length >= RATE.maxInWindow) return true;
-    times.push(now);
-    this.rate.set(keyHash, times);
+    this.sql.exec('DELETE FROM events WHERE at < ?', now - 3600_000);
+    const [{ n, last }] = this.sql.exec('SELECT COUNT(*) AS n, MAX(at) AS last FROM events WHERE ip_hash = ? AND kind = ? AND at > ?',
+      ipHash, kind, now - windowMs).toArray();
+    if (n >= max || (minGapMs && last && now - last < minGapMs)) return true;
+    this.sql.exec('INSERT INTO events (ip_hash, kind, at) VALUES (?, ?, ?)', ipHash, kind, now);
     return false;
   }
 
@@ -94,7 +119,9 @@ export class ChatRoom extends DurableObject {
     if (!me) return this.send(ws, { type: 'error', error: 'Сначала выберите ник' });
     const text = String(msg.text || '').replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT);
     if (!text) return;
-    if (!att.admin && this.limited(att.keyHash)) return this.send(ws, { type: 'error', error: 'Слишком быстро, подождите' });
+    if (!att.admin && this.limited(att.ipHash, 'msg', RATE.windowMs, RATE.maxInWindow, RATE.minGapMs)) {
+      return this.send(ws, { type: 'error', error: 'Слишком быстро, подождите' });
+    }
     const m = {
       id: crypto.randomUUID(), t: Date.now(), nick: me.nick, color: me.color, text,
       badges: await this.resolveBadges(msg.badges || {}, att.base),
