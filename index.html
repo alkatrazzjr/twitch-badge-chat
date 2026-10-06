@@ -139,22 +139,29 @@
       </div>
 
       <form class="upload" id="form-drop" data-kind="drop">
-        <p class="spec">Требования Twitch: квадратный <b>PNG</b>, <b>без анимации</b>, до <b>25 КБ</b>, рекомендуется от <b>120×120</b>.
-          В событии 1–2 значка: за подписки/подарки (1–5, Prime не считается) и/или за просмотр (1–8 ч). Событие не дольше 28 дней.</p>
-        <label>Событие<input class="field" name="event" required maxlength="60" placeholder="Subathon 2026"></label>
-        <label>Название значка (только латиница и цифры)<input class="field" name="title" required maxlength="25" pattern="[A-Za-z0-9]+" placeholder="Subathon2026"></label>
+        <p class="spec">По <a href="https://help.twitch.tv/s/article/creator-badge-rewards" target="_blank" rel="noopener">справке Twitch</a>:
+          квадратный <b>PNG</b>, <b>без анимации</b>, до <b>25 КБ</b>, рекомендуется от <b>120×120</b>; название до <b>25 символов</b>.
+          В событии до 3 значков: за подписки/подарки (<b>1–100</b>, обязательный), за просмотр (<b>до 24 ч</b>) и Top Supporter (топ 1/3/5/10 дарителей).
+          Событие не дольше <b>28 дней</b>, одновременно активно только одно событие.</p>
+        <label>Событие<input class="field" name="event" required maxlength="60" placeholder="Subathon 2026" list="eventList"></label>
+        <datalist id="eventList"></datalist>
         <div class="row">
-          <label>Начало<input class="field" type="date" name="start" required></label>
-          <label>Конец<input class="field" type="date" name="end" required></label>
+          <label>Начало<input class="field" type="datetime-local" name="start" required></label>
+          <label>Конец<input class="field" type="datetime-local" name="end" required></label>
         </div>
+        <label>Название значка (до 25 символов)<input class="field" name="title" required maxlength="25" placeholder="28' Bday"></label>
         <div class="row">
-          <label>Способ получения
+          <label>Награда
             <select class="field" name="unlock">
               <option value="sub">Подписки / подарочные подписки</option>
               <option value="watch">Время просмотра</option>
+              <option value="top">Top Supporter</option>
             </select>
           </label>
-          <label>Количество<select class="field" name="amount"></select></label>
+          <label class="amount"><span id="amountLabel"></span><input class="field" type="number" name="amount" step="1" required></label>
+          <label class="top" hidden>Мест в топе
+            <select class="field" name="top"><option>1</option><option>3</option><option>5</option><option>10</option></select>
+          </label>
         </div>
         <label>Изображение<input class="field" type="file" name="file" accept="image/png" required></label>
         <div class="check" aria-live="polite"></div>
@@ -162,18 +169,14 @@
       </form>
 
       <form class="upload" id="form-sub" data-kind="sub" hidden>
-        <p class="spec">Требования Twitch: <b>PNG</b> с прозрачным фоном, размеры <b>18×18, 36×36, 72×72</b>, каждый до <b>25 КБ</b>.
-          Простая загрузка: один файл 72×72, остальные размеры создаются автоматически.</p>
+        <p class="spec">По <a href="https://help.twitch.tv/s/article/subscriber-badge-guide" target="_blank" rel="noopener">справке Twitch</a>:
+          три <b>PNG</b> с <b>прозрачным фоном</b> — <b>18×18, 36×36, 72×72</b>, каждый до <b>25 КБ</b>.</p>
         <label>Стаж подписки
           <select class="field" name="months"></select>
         </label>
-        <label class="toggle-row"><span>Расширенная загрузка (3 файла)</span><input type="checkbox" name="advanced"></label>
-        <label class="simple">72×72<input class="field" type="file" name="f72" accept="image/png"></label>
-        <div class="advanced" hidden>
-          <label>18×18<input class="field" type="file" name="a18" accept="image/png"></label>
-          <label>36×36<input class="field" type="file" name="a36" accept="image/png"></label>
-          <label>72×72<input class="field" type="file" name="a72" accept="image/png"></label>
-        </div>
+        <label>18×18<input class="field" type="file" name="a18" accept="image/png" required></label>
+        <label>36×36<input class="field" type="file" name="a36" accept="image/png" required></label>
+        <label>72×72<input class="field" type="file" name="a72" accept="image/png" required></label>
         <div class="check" aria-live="polite"></div>
         <button class="btn primary">Загрузить значок</button>
       </form>

@@ -28,7 +28,10 @@ const DROP_MAX_DAYS = 28;            // "event period cannot exceed 28 days"
 const SUB_MAX_BYTES = 25 * KB;       // subscriber badges: 25 KB per file
 const GLOBAL_MAX_BYTES = 100 * KB;
 const SUB_MONTHS = [1, 2, 3, 6, 9, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66, 72, 78, 84, 90, 96, 102, 108, 114, 120];
-const UNLOCK_RANGE = { sub: [1, 5], watch: [1, 8] };
+// Creator Badge Drops limits per help.twitch.tv/s/article/creator-badge-rewards (raised in Aug 2026 from 1–5 subs / 8 h).
+const UNLOCK_RANGE = { sub: [1, 100], watch: [1, 24] };
+const TOP_SPOTS = [1, 3, 5, 10];
+const DROP_NAME_MAX = 25;
 
 // Twitch's preset name colors, in the order of the identity card.
 const COLORS = ['#FF0000', '#0000FF', '#008000', '#B22222', '#FF7F50', '#9ACD32', '#FF4500',
@@ -62,6 +65,7 @@ const imgSrc = (path) => freshImages.get(path) || path;
 
 async function gh(path, opts = {}) {
   const res = await fetch('https://api.github.com' + path, {
+    cache: 'no-store', // API GETs are cacheable for 60 s; a stale ref breaks back-to-back commits
     ...opts,
     headers: {
       Accept: 'application/vnd.github+json',
@@ -95,31 +99,43 @@ async function fetchManifestPublic() {
   return null;
 }
 
-async function fetchManifestApi() {
-  const file = await gh(`${repoPath()}/contents/${MANIFEST_PATH}`);
+async function fetchManifestApi(ref = '') {
+  const file = await gh(`${repoPath()}/contents/${MANIFEST_PATH}${ref ? `?ref=${ref}` : ''}`);
   return JSON.parse(b64ToText(file.content));
 }
 
-// One atomic commit: blobs -> tree -> commit -> fast-forward ref (fails if someone pushed in between).
-async function commitChanges(changes, message) {
+const manifestBytes = (m) => new TextEncoder().encode(JSON.stringify(m, null, 2) + '\n');
+
+// Read-modify-write of the manifest as one atomic commit. The manifest is read at the exact head commit that becomes
+// the parent, and the ref update is fast-forward only, so a concurrent push makes it retry instead of losing badges.
+// `change(latest)` mutates the manifest and returns image file changes ({ path, bytes } / bytes: null = delete).
+async function updateManifest(message, change) {
   const base = repoPath();
   const { default_branch: branch } = await gh(base);
-  const ref = await gh(`${base}/git/ref/heads/${branch}`);
-  const head = await gh(`${base}/git/commits/${ref.object.sha}`);
-  const tree = await Promise.all(changes.map(async (c) => ({
-    path: c.path, mode: '100644', type: 'blob',
-    sha: c.bytes ? (await gh(`${base}/git/blobs`, {
-      method: 'POST', body: JSON.stringify({ content: bytesToB64(c.bytes), encoding: 'base64' }),
-    })).sha : null,
-  })));
-  const newTree = await gh(`${base}/git/trees`, { method: 'POST', body: JSON.stringify({ base_tree: head.tree.sha, tree }) });
-  const commit = await gh(`${base}/git/commits`, {
-    method: 'POST', body: JSON.stringify({ message, tree: newTree.sha, parents: [head.sha] }),
-  });
-  await gh(`${base}/git/refs/heads/${branch}`, { method: 'PATCH', body: JSON.stringify({ sha: commit.sha }) });
+  for (let attempt = 1; ; attempt++) {
+    const { object: { sha: headSha } } = await gh(`${base}/git/ref/heads/${branch}`);
+    const head = await gh(`${base}/git/commits/${headSha}`);
+    const latest = await fetchManifestApi(headSha);
+    const files = [...await change(latest), { path: MANIFEST_PATH, bytes: manifestBytes(latest) }];
+    const tree = await Promise.all(files.map(async (c) => ({
+      path: c.path, mode: '100644', type: 'blob',
+      sha: c.bytes ? (await gh(`${base}/git/blobs`, {
+        method: 'POST', body: JSON.stringify({ content: bytesToB64(c.bytes), encoding: 'base64' }),
+      })).sha : null,
+    })));
+    const newTree = await gh(`${base}/git/trees`, { method: 'POST', body: JSON.stringify({ base_tree: head.tree.sha, tree }) });
+    const commit = await gh(`${base}/git/commits`, {
+      method: 'POST', body: JSON.stringify({ message: message(latest), tree: newTree.sha, parents: [headSha] }),
+    });
+    try {
+      await gh(`${base}/git/refs/heads/${branch}`, { method: 'PATCH', body: JSON.stringify({ sha: commit.sha }) });
+      return { manifest: latest, files };
+    } catch (err) {
+      if (attempt >= 4 || !/fast forward/i.test(err.message)) throw err;
+      await new Promise((r) => setTimeout(r, 1000 * attempt));
+    }
+  }
 }
-
-const manifestBytes = (m) => new TextEncoder().encode(JSON.stringify(m, null, 2) + '\n');
 
 async function loadManifest() {
   let m = null;
@@ -140,9 +156,11 @@ const plural = (n, one, few, many) => {
 function describe(b) {
   if (b.kind === 'drop') {
     const n = b.unlock.amount;
-    const how = b.unlock.type === 'watch'
-      ? `${n} ч просмотра`
-      : `${n} ${plural(n, 'подписка', 'подписки', 'подписок')} (вкл. подарочные)`;
+    const how = {
+      sub: `${n} ${plural(n, 'подписка', 'подписки', 'подписок')} или подарков`,
+      watch: `${n} ч просмотра`,
+      top: `топ-${n} дарителей события`,
+    }[b.unlock.type];
     return `Creator Badge Drop «${b.event.name}» · ${how}`;
   }
   if (b.kind === 'sub') return 'Значок подписчика';
@@ -419,17 +437,6 @@ async function inspectPng(file) {
 
 const kb = (n) => `${(n / KB).toFixed(1)} КБ`;
 
-// Downscale a PNG on a canvas (Twitch "simple upload" for sub badges).
-async function resizePng(bytes, size) {
-  const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
-  const c = el('canvas', { width: size, height: size });
-  const ctx = c.getContext('2d');
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(bmp, 0, 0, size, size);
-  const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
-  return new Uint8Array(await blob.arrayBuffer());
-}
-
 const dataUrl = (bytes) => `data:image/png;base64,${bytesToB64(bytes)}`;
 
 /* ---------- validation per badge kind ---------- */
@@ -452,29 +459,51 @@ function checkImage(c, info, { maxBytes, exact, minRecommended, square = true, r
   }
   if (minRecommended && info.width < minRecommended) c.warn(`${label}Рекомендуется от ${minRecommended}×${minRecommended}`);
   info.size <= maxBytes ? c.ok(`${label}${kb(info.size)} ≤ ${kb(maxBytes)}`) : c.err(`${label}${kb(info.size)} больше ${kb(maxBytes)}`);
-  if (!info.alpha) (requireAlpha ? c.err : c.warn)(`${label}Нет прозрачности (рекомендуется прозрачный фон)`);
+  if (!info.alpha) (requireAlpha ? c.err : c.warn)(`${label}Нет прозрачного фона${requireAlpha ? '' : ' (рекомендуется)'}`);
 }
 
 const validators = {
   async drop(form, current) {
     const c = checks();
     const f = form.elements;
+    const type = f.unlock.value;
     const title = f.title.value.trim();
     const eventName = f.event.value.trim();
-    if (title && !/^[A-Za-z0-9]+$/.test(title)) c.err('Название: только латинские буквы и цифры');
-    if (f.start.value && f.end.value) {
-      const days = (new Date(f.end.value) - new Date(f.start.value)) / 86400000;
-      if (days <= 0) c.err('Конец события должен быть позже начала');
-      else if (days > DROP_MAX_DAYS) c.err(`Событие ${days} дн. — максимум ${DROP_MAX_DAYS}`);
-      else c.ok(`Длительность ${days} дн. ≤ ${DROP_MAX_DAYS}`);
+    const typeName = { sub: 'за подписки/подарки', watch: 'за просмотр', top: 'Top Supporter' }[type];
+    if (title.length > DROP_NAME_MAX) c.err(`Название длиннее ${DROP_NAME_MAX} символов`);
+
+    if (type === 'top') {
+      if (!TOP_SPOTS.includes(Number(f.top.value))) c.err('Мест в топе: 1, 3, 5 или 10');
+    } else {
+      const [min, max] = UNLOCK_RANGE[type];
+      const n = Number(f.amount.value);
+      if (!(Number.isInteger(n) && n >= min && n <= max)) c.err(`Количество: целое от ${min} до ${max}`);
     }
+
+    const start = new Date(f.start.value), end = new Date(f.end.value);
+    if (f.start.value && f.end.value) {
+      const days = (end - start) / 86400000;
+      if (days <= 0) c.err('Конец события должен быть позже начала');
+      else if (days > DROP_MAX_DAYS) c.err(`Событие ${+days.toFixed(1)} дн. — максимум ${DROP_MAX_DAYS}`);
+      else c.ok(`Длительность ${+days.toFixed(1)} дн. ≤ ${DROP_MAX_DAYS}`);
+    }
+
     if (eventName) {
-      const same = current.filter((b) => b.kind === 'drop' && b.event.name.toLowerCase() === eventName.toLowerCase());
-      if (same.length >= 2) c.err('В событии уже 2 значка (максимум)');
-      else if (same.some((b) => b.unlock.type === f.unlock.value)) {
-        c.err(`В событии уже есть значок «${f.unlock.value === 'watch' ? 'за просмотр' : 'за подписки'}»`);
+      const drops = current.filter((b) => b.kind === 'drop');
+      const same = drops.filter((b) => b.event.name.toLowerCase() === eventName.toLowerCase());
+      if (same.some((b) => b.unlock.type === type)) c.err(`В событии уже есть значок «${typeName}»`);
+      if (type !== 'sub' && !same.some((b) => b.unlock.type === 'sub')) {
+        c.err('Сначала добавьте обязательный значок за подписки/подарки');
+      }
+      if (same.length && (same[0].event.start !== f.start.value || same[0].event.end !== f.end.value)) {
+        c.err('Даты должны совпадать с датами этого события');
+      }
+      if (!same.length && f.start.value && f.end.value) {
+        const clash = drops.find((b) => new Date(b.event.start) < end && start < new Date(b.event.end));
+        if (clash) c.err(`Пересекается с событием «${clash.event.name}» — одновременно идёт только одно событие`);
       }
     }
+
     const file = f.file.files[0];
     let info = null;
     if (file) {
@@ -490,25 +519,12 @@ const validators = {
     const months = Number(f.months.value);
     if (current.some((b) => b.kind === 'sub' && b.months === months)) c.err(`Значок за ${months} мес. уже есть`);
     const sizes = {};
-    if (f.advanced.checked) {
-      for (const s of [18, 36, 72]) {
-        const file = f['a' + s].files[0];
-        if (!file) continue;
-        const info = await inspectPng(file);
-        checkImage(c, info, { maxBytes: SUB_MAX_BYTES, exact: s, label: `${s}px: ` });
-        if (info.png) sizes[s] = info.bytes;
-      }
-    } else if (f.f72.files[0]) {
-      const info = await inspectPng(f.f72.files[0]);
-      checkImage(c, info, { maxBytes: SUB_MAX_BYTES, exact: 72, label: '72px: ' });
-      if (info.png && info.width === 72 && info.height === 72 && !info.animated) {
-        sizes[72] = info.bytes;
-        for (const s of [36, 18]) {
-          sizes[s] = await resizePng(info.bytes, s);
-          if (sizes[s].length > SUB_MAX_BYTES) c.err(`${s}px (авто): ${kb(sizes[s].length)} больше 25 КБ`);
-        }
-        c.ok('18×18 и 36×36 созданы автоматически');
-      }
+    for (const s of [18, 36, 72]) {
+      const file = f['a' + s].files[0];
+      if (!file) continue;
+      const info = await inspectPng(file);
+      checkImage(c, info, { maxBytes: SUB_MAX_BYTES, exact: s, requireAlpha: true, label: `${s}px: ` });
+      if (info.png) sizes[s] = info.bytes;
     }
     return { c, previews: [18, 36, 72].map((s) => sizes[s]).filter(Boolean), build: () => buildSub(form, sizes) };
   },
@@ -536,7 +552,7 @@ function buildDrop(form, info) {
     badge: {
       id, kind: 'drop', title: f.title.value.trim(),
       event: { name: f.event.value.trim(), start: f.start.value, end: f.end.value },
-      unlock: { type: f.unlock.value, amount: Number(f.amount.value) },
+      unlock: { type: f.unlock.value, amount: Number(f.unlock.value === 'top' ? f.top.value : f.amount.value) },
       images: { x4: path }, createdAt: new Date().toISOString(),
     },
     files: [{ path, bytes: info.bytes }],
@@ -635,27 +651,38 @@ document.querySelectorAll('.tab').forEach((t) => {
   };
 });
 
-// drop: amount options depend on unlock type
+// drop: the amount control depends on the reward type
 const dropForm = $('#form-drop');
 function fillAmounts() {
-  const [min, max] = UNLOCK_RANGE[dropForm.elements.unlock.value];
-  const unit = dropForm.elements.unlock.value === 'watch' ? (n) => `${n} ч` : (n) => `${n} ${plural(n, 'подписка', 'подписки', 'подписок')}`;
-  dropForm.elements.amount.replaceChildren(...Array.from({ length: max - min + 1 }, (_, i) => el('option', { value: min + i, textContent: unit(min + i) })));
+  const type = dropForm.elements.unlock.value;
+  $('.top', dropForm).hidden = type !== 'top';
+  $('.amount', dropForm).hidden = type === 'top';
+  const amount = dropForm.elements.amount;
+  amount.required = type !== 'top';
+  if (type === 'top') return;
+  const [min, max] = UNLOCK_RANGE[type];
+  Object.assign(amount, { min, max, value: Math.min(Math.max(Number(amount.value) || min, min), max) });
+  $('#amountLabel').textContent = type === 'watch' ? `Часов просмотра (${min}–${max})` : `Подписок или подарков (${min}–${max})`;
+}
+const localDT = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+function resetDropForm() {
+  fillAmounts();
+  const start = new Date();
+  start.setHours(start.getHours() + 1, 0, 0, 0);
+  dropForm.elements.start.value = localDT(start);
+  dropForm.elements.end.value = localDT(new Date(start.getTime() + 7 * 86400000));
 }
 dropForm.elements.unlock.addEventListener('change', fillAmounts);
-fillAmounts();
-const today = new Date();
-const isoDate = (d) => d.toISOString().slice(0, 10);
-dropForm.elements.start.value = isoDate(today);
-dropForm.elements.end.value = isoDate(new Date(today.getTime() + 7 * 86400000));
+// all badges of one event share its dates: picking an existing event fills them in
+dropForm.elements.event.addEventListener('input', () => {
+  const name = dropForm.elements.event.value.trim().toLowerCase();
+  const ev = manifest.badges.find((b) => b.kind === 'drop' && b.event.name.toLowerCase() === name);
+  if (ev) { dropForm.elements.start.value = ev.event.start; dropForm.elements.end.value = ev.event.end; }
+});
+resetDropForm();
 
 const subForm = $('#form-sub');
 subForm.elements.months.replaceChildren(...SUB_MONTHS.map((m) => el('option', { value: m, textContent: `${m} мес.` })));
-subForm.elements.advanced.addEventListener('change', () => {
-  const adv = subForm.elements.advanced.checked;
-  $('.advanced', subForm).hidden = !adv;
-  $('.simple', subForm).hidden = adv;
-});
 
 for (const form of document.querySelectorAll('.upload')) {
   const run = () => validators[form.dataset.kind](form, manifest.badges);
@@ -666,21 +693,23 @@ for (const form of document.querySelectorAll('.upload')) {
     btn.disabled = true;
     status('Проверка…');
     try {
-      const latest = await fetchManifestApi(); // validate against the committed state, not a stale copy
-      const result = await validators[form.dataset.kind](form, latest.badges);
-      renderCheck(form, result);
-      if (result.c.failed()) throw new Error('Исправьте ошибки выше');
-      const files = form.dataset.kind === 'sub' ? [18, 36, 72] : [1];
-      if (!result.previews.length || result.previews.length < files.length) throw new Error('Выберите файл(ы) изображения');
-      const { badge, files: imgs } = result.build();
-      latest.badges.push(badge);
-      status('Сохранение в репозиторий…');
-      await commitChanges([...imgs, { path: MANIFEST_PATH, bytes: manifestBytes(latest) }], `Add badge: ${badge.title}`);
-      for (const f of imgs) freshImages.set(f.path, dataUrl(f.bytes));
-      manifest = latest;
+      let badge;
+      const saved = await updateManifest(() => `Add badge: ${badge.title}`, async (latest) => {
+        // validate against the committed state, not a stale copy
+        const result = await validators[form.dataset.kind](form, latest.badges);
+        renderCheck(form, result);
+        if (result.c.failed()) throw new Error('Исправьте ошибки выше');
+        if (result.previews.length < (form.dataset.kind === 'sub' ? 3 : 1)) throw new Error('Выберите файл(ы) изображения');
+        status('Сохранение в репозиторий…');
+        const built = result.build();
+        badge = built.badge;
+        latest.badges.push(badge);
+        return built.files;
+      });
+      for (const f of saved.files) if (f.path !== MANIFEST_PATH) freshImages.set(f.path, dataUrl(f.bytes));
+      manifest = saved.manifest;
       form.reset();
-      if (form === dropForm) { fillAmounts(); dropForm.elements.start.value = isoDate(new Date()); dropForm.elements.end.value = isoDate(new Date(Date.now() + 7 * 86400000)); }
-      if (form === subForm) subForm.elements.advanced.dispatchEvent(new Event('change'));
+      if (form === dropForm) resetDropForm();
       $('.check', form).replaceChildren();
       renderAll();
       status(`Значок «${badge.title}» добавлен. Для других зрителей появится через ~1 минуту.`);
@@ -694,7 +723,8 @@ for (const form of document.querySelectorAll('.upload')) {
 
 function renderBadgeList() {
   const box = $('#badgeList');
-  if (!box) return;
+  const events = new Set(manifest.badges.filter((b) => b.kind === 'drop').map((b) => b.event.name));
+  $('#eventList').replaceChildren(...[...events].map((value) => el('option', { value })));
   box.replaceChildren(...(manifest.badges.length ? manifest.badges.map((b) => {
     const v = badgeView(b);
     const del = el('button', { className: 'btn danger', textContent: 'Удалить' });
@@ -716,17 +746,19 @@ async function deleteBadge(b, btn) {
   btn.disabled = true;
   status('Удаление…');
   try {
-    const latest = await fetchManifestApi();
-    const target = latest.badges.find((x) => x.id === b.id);
-    if (!target) throw new Error('Значок уже удалён');
-    latest.badges = latest.badges.filter((x) => x.id !== b.id);
-    await commitChanges([
-      ...Object.values(target.images).map((path) => ({ path, bytes: null })),
-      { path: MANIFEST_PATH, bytes: manifestBytes(latest) },
-    ], `Remove badge: ${target.title}`);
-    manifest = latest;
+    const saved = await updateManifest(() => `Remove badge: ${b.title}`, async (latest) => {
+      const target = latest.badges.find((x) => x.id === b.id);
+      if (!target) throw new Error('Значок уже удалён');
+      if (target.kind === 'drop' && target.unlock.type === 'sub'
+        && latest.badges.some((x) => x.kind === 'drop' && x.id !== target.id && x.event.name === target.event.name)) {
+        throw new Error('Значок за подписки обязателен — сначала удалите остальные значки этого события');
+      }
+      latest.badges = latest.badges.filter((x) => x.id !== b.id);
+      return Object.values(target.images).map((path) => ({ path, bytes: null }));
+    });
+    manifest = saved.manifest;
     renderAll();
-    status(`Значок «${target.title}» удалён.`);
+    status(`Значок «${b.title}» удалён.`);
   } catch (err) {
     status(err.message, true);
     btn.disabled = false;

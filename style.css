@@ -5,7 +5,7 @@
   --bg-hover: #26262c;
   --bg-elevated: #1f1f23;
   --bg-field: #2f2f35;
-  --border: #2f2f35;
+  --border: rgba(83, 83, 95, .48);
   --border-field: #4b4b55;
   --text: #efeff1;
   --text-muted: #adadb8;
@@ -45,7 +45,7 @@ a { color: #bf94ff; }
 .chat.collapsed #collapseBtn svg { transform: scaleX(-1); }
 
 .chat-header {
-  height: 50px; flex: none; display: flex; align-items: center; justify-content: space-between;
+  height: 40px; flex: none; display: flex; align-items: center; justify-content: space-between;
   padding: 0 10px; border-bottom: 1px solid var(--border);
 }
 .chat-header h1 { font-size: 13px; font-weight: 600; margin: 0; text-transform: none; }
@@ -58,11 +58,11 @@ a { color: #bf94ff; }
 .icon-btn:focus-visible, .btn:focus-visible, .send-btn:focus-visible, .badge-opt:focus-visible { outline: 2px solid var(--purple); outline-offset: 1px; }
 
 .chat-scroll { flex: 1; overflow-y: auto; padding: 10px 0; overflow-wrap: anywhere; }
-.chat-welcome { color: var(--text-muted); padding: 5px 20px; }
+.chat-welcome { color: #d3d3d9; padding: 5px 20px; font-size: 14px; line-height: 22px; }
 
-.line { padding: 5px 20px; line-height: 20px; position: relative; }
+.line { padding: 5px 20px; font-size: 14px; line-height: 21px; position: relative; }
 .line:hover { background: var(--bg-hover); }
-.ts { color: var(--text-muted); margin-right: 5px; }
+.ts { color: #d3d3d9; margin-right: 4px; }
 .hide-ts .ts { display: none; }
 .mod-btn {
   display: inline-grid; place-items: center; width: 18px; height: 18px; padding: 0; margin-right: 4px;
@@ -70,7 +70,7 @@ a { color: #bf94ff; }
 }
 .mod-btn:hover { background: #ffffff26; }
 .badge {
-  display: inline-block; width: 18px; height: 18px; margin: 0 3px 2px 0;
+  display: inline-block; width: 18px; height: 18px; margin: 0 3px 1.5px 0;
   vertical-align: middle; border-radius: 2px; object-fit: contain;
 }
 .name { font-weight: 700; cursor: pointer; }
@@ -212,3 +212,6 @@ a { color: #bf94ff; }
   .chat { width: 100%; border-left: 0; }
   #collapseBtn { visibility: hidden; }
 }
+
+.send-btn { border-radius: 9000px; height: 32px; padding: 0 12px; }
+.chat-input textarea { font-size: 14px; line-height: 21px; }
