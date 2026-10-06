@@ -188,6 +188,7 @@ svg { display: block; }
 .menu { left: auto; width: 320px; }
 .menu .pop-body { padding: 0 10px 10px; }
 .menu-section + .menu-section { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 6px; }
+.menu-section[hidden] + .menu-section { border-top: 0; margin-top: 0; padding-top: 0; }
 .menu-label { margin: 6px 6px 4px; font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .02em; }
 .menu-item {
   display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 36px;
