@@ -889,7 +889,7 @@ function setEmotes(list) {
 }
 
 const emoteImg = (e) => {
-  const img = el('img', { className: 'emote', src: e.x1, alt: e.code, loading: 'lazy' });
+  const img = el('img', { className: 'emote', src: e.x1, alt: e.code }); // not lazy: lazy images inside a hidden popover never start loading
   img.srcset = `${e.x1} 1x, ${e.x2} 2x, ${e.x4} 4x`;
   Object.assign(img.dataset, { title: e.code, desc: `${PROVIDERS[e.provider]} · ${e.scope === 'channel' ? 'смайлик канала' : 'глобальный'}`, big: e.x4 });
   return img;
