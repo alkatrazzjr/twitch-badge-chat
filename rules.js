@@ -16,6 +16,10 @@ export const LIMITS = {
 export const UNLOCK_RANGE = { sub: [1, 100], watch: [1, 24] }; // subscriptions 1–100, watch time up to 24 h
 export const TOP_SPOTS = [1, 3, 5, 10];
 export const SUB_MONTHS = [1, 2, 3, 6, 9, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66, 72, 78, 84, 90, 96, 102, 108, 114, 120];
+// Twitch global badge sets by identity-card slot (everything else is a global badge).
+export const ROLE_SETS = ['broadcaster', 'lead_moderator', 'moderator', 'vip', 'artist-badge', 'partner', 'staff', 'admin', 'global_mod'];
+export const CHANNEL_SETS = ['subscriber', 'founder', 'sub-gifter', 'sub-gift-leader', 'bits', 'bits-leader', 'predictions', 'hype-train', 'moments', 'clips-leader'];
+
 export const IMAGE_KEYS = { drop: ['x4'], sub: ['x1', 'x2', 'x4'], global: ['x4'] };
 const SUB_SIZES = { x1: 18, x2: 36, x4: 72 };
 
@@ -148,4 +152,27 @@ export function deleteBlocker(target, existing) {
   return existing.some((b) => b.kind === 'drop' && b.id !== target.id && b.event.name === target.event.name)
     ? 'Значок за подписки обязателен — сначала удалите остальные значки этого события'
     : null;
+}
+
+// Human-readable badge description (tooltips, viewer card, chat snapshots).
+export const plural = (n, one, few, many) => {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+};
+
+export function describe(b) {
+  if (b.kind === 'drop') {
+    const n = b.unlock.amount;
+    const how = {
+      sub: `${n} ${plural(n, 'подписка', 'подписки', 'подписок')} (вкл. подарочные)`,
+      watch: `${n} ч просмотра`,
+      top: `топ-${n} дарителей события`,
+    }[b.unlock.type];
+    return `Creator Badge Drop «${b.event.name}» · ${how}`;
+  }
+  if (b.kind === 'sub') return 'Значок подписчика';
+  if (b.kind === 'twitch') return b.desc && b.desc !== b.title ? b.desc : 'Значок Twitch';
+  return b.desc || 'Общий значок';
 }

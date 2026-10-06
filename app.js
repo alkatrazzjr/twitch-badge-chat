@@ -1,4 +1,4 @@
-import { validateBadge, deleteBlocker, UNLOCK_RANGE, SUB_MONTHS } from './rules.js';
+import { validateBadge, deleteBlocker, describe, plural, ROLE_SETS, CHANNEL_SETS, UNLOCK_RANGE, SUB_MONTHS } from './rules.js';
 
 /* ---------- config ---------- */
 const CHANNEL = 'AlkatrazzJR';
@@ -31,8 +31,6 @@ const COLORS = ['#FF0000', '#0000FF', '#008000', '#B22222', '#FF7F50', '#9ACD32'
   '#2E8B57', '#DAA520', '#D2691E', '#5F9EA0', '#1E90FF', '#FF69B4', '#8A2BE2', '#00FF7F'];
 
 // Twitch global badge sets grouped the way the identity card offers them.
-const ROLE_SETS = ['broadcaster', 'lead_moderator', 'moderator', 'vip', 'artist-badge', 'partner', 'staff', 'admin', 'global_mod'];
-const CHANNEL_SETS = ['subscriber', 'founder', 'sub-gifter', 'sub-gift-leader', 'bits', 'bits-leader', 'predictions', 'hype-train', 'moments', 'clips-leader'];
 // Twitch shows at most 3 badges: role, one channel badge (sub / bits / gifts / drop), one chosen global badge.
 const SLOTS = ['role', 'channelBadge', 'globalBadge'];
 
@@ -96,28 +94,6 @@ async function refresh() {
 }
 
 /* ---------- badge helpers ---------- */
-const plural = (n, one, few, many) => {
-  const m10 = n % 10, m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return one;
-  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
-  return many;
-};
-
-function describe(b) {
-  if (b.kind === 'drop') {
-    const n = b.unlock.amount;
-    const how = {
-      sub: `${n} ${plural(n, 'подписка', 'подписки', 'подписок')} (вкл. подарочные)`,
-      watch: `${n} ч просмотра`,
-      top: `топ-${n} дарителей события`,
-    }[b.unlock.type];
-    return `Creator Badge Drop «${b.event.name}» · ${how}`;
-  }
-  if (b.kind === 'sub') return 'Значок подписчика';
-  if (b.kind === 'twitch') return b.desc && b.desc !== b.title ? b.desc : 'Значок Twitch';
-  return b.desc || 'Общий значок';
-}
-
 // Messages store this view so old lines keep the badge they were sent with.
 const badgeView = (b) => ({ images: b.images, title: b.title, desc: describe(b) });
 const bigSrc = (imgs) => imgs.x4 || imgs.x2 || imgs.x1;
@@ -149,17 +125,20 @@ function badgeImg(v) {
 
 /* ---------- state ---------- */
 const profile = Object.assign(
-  { nick: 'Viewer', color: '#FF0000', role: null, channelBadge: null, globalBadge: null },
+  { nick: '', color: '#FF0000', role: null, channelBadge: null, globalBadge: null },
   store.get('tbc.profile', {}),
 );
+// nick is unique per browser on the server; start with a random one like Twitch's anonymous viewers
+if (!profile.nick || profile.nick === 'Viewer') profile.nick = `viewer${Math.floor(10000 + Math.random() * 90000)}`;
 // v1 stored roles as plain names with home-made icons
 if (profile.role && !profile.role.startsWith('tw:')) profile.role = `tw:${profile.role}:1`;
 // v2 had a 4th slot; Twitch only has 3
 if ('extraBadge' in profile) { profile.channelBadge ??= profile.extraBadge; delete profile.extraBadge; }
-let messages = store.get('tbc.messages', []);
+let messages = [];        // shared chat, kept by the server
+let chatAdmin = false;    // only the owner moderates the shared chat
+store.del('tbc.messages'); // v1–v3 kept a per-browser chat
 const settings = Object.assign({ timestamps: true }, store.get('tbc.settings', {}));
 const saveProfile = () => store.set('tbc.profile', profile);
-const saveMessages = () => store.set('tbc.messages', messages);
 
 /* ---------- name color readability (Twitch lightens dark colors on the dark theme) ---------- */
 function readable(hex) {
@@ -185,13 +164,11 @@ const trashIcon = () => {
   return s;
 };
 
-const isMod = () => ['tw:broadcaster:1', 'tw:moderator:1', 'tw:lead_moderator:1'].includes(profile.role);
-
 function lineEl(m) {
   const line = el('div', { className: 'line' });
   line.dataset.id = m.id;
   line.append(el('span', { className: 'ts', textContent: fmtTime(m.t) }));
-  if (isMod()) {
+  if (chatAdmin) {
     line.append(el('button', { className: 'mod-btn', title: 'Удалить сообщение', ariaLabel: 'Удалить сообщение' }, trashIcon()));
   }
   for (const b of m.badges) line.append(badgeImg(b));
@@ -208,16 +185,75 @@ function renderMessages() {
   scroller.scrollTop = scroller.scrollHeight;
 }
 
-function addMessage(text) {
-  const m = { id: crypto.randomUUID(), t: Date.now(), nick: profile.nick, color: profile.color, badges: currentBadges(), text };
-  messages.push(m);
-  if (messages.length > MAX_MESSAGES) {
-    messages = messages.slice(-MAX_MESSAGES);
-    list.firstElementChild?.remove();
-  }
-  saveMessages();
-  list.append(lineEl(m));
-  scroller.scrollTop = scroller.scrollHeight;
+function appendLine(node) {
+  const stick = atBottom();
+  list.append(node);
+  while (list.children.length > MAX_MESSAGES) list.firstElementChild.remove();
+  if (stick) scroller.scrollTop = scroller.scrollHeight; else $('#moreBtn').hidden = false;
+}
+
+// local-only notices (errors, "chat cleared"), styled like Twitch system lines
+const notice = (text) => appendLine(el('div', { className: 'line notice', textContent: text }));
+
+/* ---------- shared chat connection ---------- */
+let ws = null;
+let retry = 0;
+const wsSend = (msg) => {
+  if (ws?.readyState !== WebSocket.OPEN) { notice('Нет соединения с чатом, переподключаемся…'); return false; }
+  ws.send(JSON.stringify(msg));
+  return true;
+};
+const sendProfile = () => wsSend({ type: 'profile', nick: profile.nick, color: profile.color });
+
+function connect() {
+  ws = new WebSocket(API.replace(/^http/, 'ws') + '/chat');
+  ws.onopen = () => { retry = 0; ws.send(JSON.stringify({ type: 'hello', key: browserKey, adminKey })); };
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'init') {
+      $('#chatStatus').hidden = true;
+      chatAdmin = msg.admin;
+      messages = msg.messages;
+      renderMessages();
+      renderSettings();
+      if (msg.me) applyServerProfile(msg.me); else sendProfile();
+    } else if (msg.type === 'msg') {
+      messages.push(msg.m);
+      if (messages.length > MAX_MESSAGES) messages.shift();
+      appendLine(lineEl(msg.m));
+    } else if (msg.type === 'delete') {
+      messages = messages.filter((m) => m.id !== msg.id);
+      list.querySelector(`.line[data-id="${CSS.escape(msg.id)}"]`)?.remove();
+    } else if (msg.type === 'clear') {
+      messages = [];
+      list.replaceChildren();
+      notice('Чат был очищен модератором');
+    } else if (msg.type === 'profile') {
+      if (!msg.error) applyServerProfile(msg.me);
+      else {
+        $('#nickError').textContent = msg.error;
+        $('#nickError').hidden = false;
+        // keep posting under the last accepted nick / color
+        if (registered) { profile.nick = registered.nick; profile.color = registered.color; saveProfile(); renderPreview(); }
+      }
+    } else if (msg.type === 'error') notice(msg.error);
+  };
+  ws.onclose = () => {
+    $('#chatStatus').hidden = false;
+    setTimeout(connect, Math.min(15000, 1000 * 2 ** retry++));
+  };
+}
+
+let registered = null;
+function applyServerProfile(me) {
+  registered = me;
+  $('#nickError').hidden = true;
+  profile.nick = me.nick;
+  profile.color = me.color;
+  saveProfile();
+  if (document.activeElement !== $('#nickInput')) $('#nickInput').value = me.nick;
+  $('#customColor').value = me.color.toLowerCase();
+  renderPreview();
 }
 
 /* ---------- viewer card (click on a nickname) ---------- */
@@ -250,16 +286,13 @@ $('#vcClose').onclick = () => { viewerCard.hidden = true; };
 list.addEventListener('click', (e) => {
   const name = e.target.closest('.name');
   if (name) {
-    const m = messages.find((x) => x.id === name.closest('.line').dataset.id);
+    const m = messages.find((x) => x.id === name.closest('.line')?.dataset.id);
     if (m) openViewerCard(m, name);
     return;
   }
   const btn = e.target.closest('.mod-btn');
   if (!btn) return;
-  const line = btn.closest('.line');
-  messages = messages.filter((m) => m.id !== line.dataset.id);
-  saveMessages();
-  line.remove();
+  wsSend({ type: 'delete', id: btn.closest('.line').dataset.id }); // removed when the server broadcasts it
 });
 
 scroller.addEventListener('scroll', () => { $('#moreBtn').hidden = atBottom(); });
@@ -283,7 +316,11 @@ $('#chatForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const text = input.value.replace(/\s+/g, ' ').trim();
   if (!text) return;
-  addMessage(text.slice(0, MAX_MESSAGE_LEN));
+  const sent = wsSend({
+    type: 'send', text: text.slice(0, MAX_MESSAGE_LEN),
+    badges: { role: profile.role, channel: profile.channelBadge, global: profile.globalBadge },
+  });
+  if (!sent) return;
   input.value = '';
   syncInput();
   input.focus();
@@ -308,7 +345,9 @@ const tsToggle = $('#tsToggle');
 tsToggle.checked = settings.timestamps;
 const applyTs = () => list.classList.toggle('hide-ts', !settings.timestamps);
 tsToggle.onchange = () => { settings.timestamps = tsToggle.checked; store.set('tbc.settings', settings); applyTs(); };
-$('#clearChat').onclick = () => { messages = []; saveMessages(); renderMessages(); togglePopover(null); };
+$('#clearChat').onclick = () => { if (chatAdmin) wsSend({ type: 'clear' }); togglePopover(null); };
+// Moderation entries exist only for the owner.
+function renderSettings() { $('#modSection').hidden = !chatAdmin; renderPreview(); }
 
 /* ---------- tooltip ---------- */
 const tooltip = $('#tooltip');
@@ -379,11 +418,11 @@ function renderCategories() {
 function pick(key, value) {
   profile[key] = value;
   saveProfile();
+  if (key === 'color') sendProfile();
   for (const btn of document.querySelectorAll(`.badge-opt[data-slot="${key}"]`)) {
     btn.setAttribute('aria-pressed', String(btn.dataset.id === (value ?? '')));
   }
   renderPreview();
-  if (key === 'role') renderMessages(); // mod tools depend on the role
 }
 
 function renderPreview() {
@@ -392,7 +431,8 @@ function renderPreview() {
     el('span', { className: 'name', textContent: profile.nick, style: `color:${readable(profile.color)}` }));
   $('#identityBtn').replaceChildren(...badges.map(badgeImg));
   if (!badges.length) $('#identityBtn').innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" fill-rule="evenodd" d="M6 8a6 6 0 1 1 12 0A6 6 0 0 1 6 8Zm6 4a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm-5 4a4 4 0 0 0-4 4v2h2v-2a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2h2v-2a4 4 0 0 0-4-4H7Z" clip-rule="evenodd"/></svg>';
-  $('#modTools').hidden = !isMod();
+  $('#modTools').hidden = !chatAdmin;
+  $('#settingsBadges').replaceChildren(...badges.map(badgeImg));
   for (const b of document.querySelectorAll('.color-opt')) b.setAttribute('aria-pressed', String(profile.color.toUpperCase() === b.title));
 }
 
@@ -428,9 +468,14 @@ function filterGlobal() {
 }
 $('#globalSearch').addEventListener('input', filterGlobal);
 
+let nickTimer;
 $('#nickInput').addEventListener('input', (e) => {
   const v = e.target.value.trim();
-  if (v) { profile.nick = v; saveProfile(); renderPreview(); }
+  if (!v) return;
+  profile.nick = v;
+  renderPreview();
+  clearTimeout(nickTimer);
+  nickTimer = setTimeout(sendProfile, 600); // the server keeps the previous nick if this one is taken
 });
 $('#nickInput').addEventListener('blur', (e) => { e.target.value = profile.nick; });
 $('#customColor').addEventListener('input', (e) => pick('color', e.target.value.toUpperCase()));
@@ -664,5 +709,6 @@ renderMessages();
 syncInput();
 refresh();
 loadTwitch();
+connect();
 addEventListener('focus', refresh);
 setInterval(() => { if (!document.hidden) refresh(); }, 60000);

@@ -1,5 +1,7 @@
 import { validateBadge, deleteBlocker, IMAGE_KEYS } from '../../rules.js';
 
+export { ChatRoom } from './chat.js';
+
 const MAX_BODY = 400 * 1024;
 const MAX_BADGES_PER_CATEGORY = 60;
 const MAX_CATEGORIES_PER_IP = 5;
@@ -199,6 +201,8 @@ export default {
     const headers = cors(req, env);
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
     if (url.pathname === '/twitch' && req.method === 'GET') return twitchBadges(req, ctx, headers);
+    // the shared chat lives in a single Durable Object; it authenticates sockets itself
+    if (url.pathname === '/chat') return env.CHAT.get(env.CHAT.idFromName('main')).fetch(req);
 
     const img = url.pathname.match(/^\/img\/([a-z0-9]+)\/(x[124])$/);
     if (img && req.method === 'GET') return image(env, img[1], img[2]);

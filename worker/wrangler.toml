@@ -11,3 +11,11 @@ database_name = "twitch-badge-chat"
 database_id = "eba15e77-958c-4a70-ba60-824a53fbc4c0"
 
 # Secret (not in git): ADMIN_KEY — `wrangler secret put ADMIN_KEY`
+
+[[durable_objects.bindings]]
+name = "CHAT"
+class_name = "ChatRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChatRoom"]

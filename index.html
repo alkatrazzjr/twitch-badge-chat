@@ -31,6 +31,7 @@
     </header>
 
     <p class="api-error" id="apiError" hidden></p>
+    <p class="chat-status" id="chatStatus">Подключение к чату…</p>
     <div class="chat-scroll" id="chatScroll">
       <div class="chat-welcome" id="welcome"></div>
       <div id="messages" role="log" aria-live="polite"></div>
@@ -69,6 +70,7 @@
         <div class="pop-body">
           <h3>Ник</h3>
           <input class="field" id="nickInput" maxlength="25" autocomplete="off" spellcheck="false">
+          <p class="field-error" id="nickError" hidden></p>
 
           <h3>Роль в канале</h3>
           <div class="picker" id="roleGrid"></div>
@@ -102,10 +104,16 @@
           <button class="icon-btn" data-close="settings" aria-label="Закрыть"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M13.414 12l5.293-5.293-1.414-1.414L12 10.586 6.707 5.293 5.293 6.707 10.586 12l-5.293 5.293 1.414 1.414L12 13.414l5.293 5.293 1.414-1.414L13.414 12Z"/></svg></button>
         </div>
         <div class="pop-body">
-          <label class="toggle-row"><span>Показывать метки времени</span><input type="checkbox" id="tsToggle"></label>
-          <button class="menu-item" id="openIdentity2">Имя в чате</button>
-          <button class="menu-item" id="openAdmin">Значки: загрузить / удалить</button>
-          <button class="menu-item danger" id="clearChat">Очистить чат</button>
+          <div class="menu-section" id="modSection" hidden>
+            <p class="menu-label">Инструменты модератора</p>
+            <button class="menu-item danger" id="clearChat">Очистить чат для всех</button>
+          </div>
+          <div class="menu-section">
+            <p class="menu-label">Мои настройки</p>
+            <button class="menu-item" id="openIdentity2"><span>Имя в чате</span><span class="menu-right"><span class="menu-badges" id="settingsBadges"></span><svg class="chev" viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M9.293 17.293 14.586 12 9.293 6.707l1.414-1.414L17.414 12l-6.707 6.707-1.414-1.414Z"/></svg></span></button>
+            <button class="menu-item" id="openAdmin"><span>Значки: загрузить / удалить</span><span class="menu-right"><svg class="chev" viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M9.293 17.293 14.586 12 9.293 6.707l1.414-1.414L17.414 12l-6.707 6.707-1.414-1.414Z"/></svg></span></button>
+            <label class="menu-item toggle"><span>Метки времени</span><input type="checkbox" role="switch" id="tsToggle"></label>
+          </div>
         </div>
       </section>
 
