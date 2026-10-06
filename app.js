@@ -1,4 +1,4 @@
-import { validateBadge, deleteBlocker, describe, plural, ROLE_SETS, CHANNEL_SETS, UNLOCK_RANGE, SUB_MONTHS } from './rules.js';
+import { validateBadge, deleteBlocker, describe, plural, ROLE_SETS, SUB_SETS, CHANNEL_SETS, SLOT_OF_UPLOAD, UNLOCK_RANGE, SUB_MONTHS } from './rules.js?v=__V__';
 
 /* ---------- config ---------- */
 const CHANNEL = 'AlkatrazzJR';
@@ -32,7 +32,7 @@ const COLORS = ['#FF0000', '#0000FF', '#008000', '#B22222', '#FF7F50', '#9ACD32'
 
 // Twitch global badge sets grouped the way the identity card offers them.
 // Twitch shows at most 3 badges: role, one channel badge (sub / bits / gifts / drop), one chosen global badge.
-const SLOTS = ['role', 'channelBadge', 'globalBadge'];
+const SLOTS = ['role', 'subBadge', 'otherBadge']; // profile keys, in chat display order
 
 /* ---------- identity for uploads: a random secret kept in this browser (+ optional owner admin key) ---------- */
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -68,7 +68,7 @@ const twitchBadge = (set, v) => ({
 const versionOrder = (a, b) => (Number(a.id) - Number(b.id)) || a.id.localeCompare(b.id, 'en', { numeric: true });
 const twitchSets = (names) => names.flatMap((n) => twitch.find((s) => s.set === n)?.versions.slice().sort(versionOrder).map((v) => twitchBadge(n, v)) ?? []);
 const twitchGlobal = () => {
-  const taken = new Set([...ROLE_SETS, ...CHANNEL_SETS]);
+  const taken = new Set([...ROLE_SETS, ...SUB_SETS, ...CHANNEL_SETS]);
   return twitch.filter((s) => !taken.has(s.set)).flatMap((s) => s.versions.slice().sort(versionOrder).map((v) => twitchBadge(s.set, v)));
 };
 
@@ -128,7 +128,7 @@ function badgeImg(v) {
 
 /* ---------- state ---------- */
 const profile = Object.assign(
-  { nick: '', color: '#FF0000', role: null, channelBadge: null, globalBadge: null },
+  { nick: '', color: '#FF0000', role: null, subBadge: null, otherBadge: null },
   store.get('tbc.profile', {}),
 );
 // nick is unique per browser on the server; start with a random one like Twitch's anonymous viewers
@@ -137,6 +137,14 @@ if (!profile.nick || profile.nick === 'Viewer') profile.nick = `viewer${Math.flo
 if (profile.role && !profile.role.startsWith('tw:')) profile.role = `tw:${profile.role}:1`;
 // v2 had a 4th slot; Twitch only has 3
 if ('extraBadge' in profile) { profile.channelBadge ??= profile.extraBadge; delete profile.extraBadge; }
+// v4 had channel + global slots; Twitch's slots are subscription + one other badge
+if ('channelBadge' in profile || 'globalBadge' in profile) {
+  const ch = profile.channelBadge;
+  const isSub = ch && (/^tw:(subscriber|founder):/.test(ch) || state.badges.find((b) => b.id === ch)?.kind === 'sub');
+  profile.subBadge ??= isSub ? ch : null;
+  profile.otherBadge ??= (!isSub && ch) || profile.globalBadge || null;
+  delete profile.channelBadge; delete profile.globalBadge;
+}
 let messages = [];        // shared chat, kept by the server
 let chatAdmin = false;    // only the owner moderates the shared chat
 store.del('tbc.messages'); // v1–v3 kept a per-browser chat
@@ -348,7 +356,7 @@ $('#chatForm').addEventListener('submit', (e) => {
   if (!text) return;
   const sent = wsSend({
     type: 'send', text: text.slice(0, MAX_MESSAGE_LEN),
-    badges: { role: profile.role, channel: profile.channelBadge, global: profile.globalBadge },
+    badges: { role: profile.role, sub: profile.subBadge, other: profile.otherBadge },
   });
   if (!sent) return;
   input.value = '';
@@ -377,6 +385,7 @@ tsToggle.onchange = () => { settings.timestamps = tsToggle.checked; store.set('t
 $('#clearChat').onclick = () => { if (chatAdmin) wsSend({ type: 'clear' }); togglePopover(null); };
 // Moderation entries exist only for the owner.
 function renderSettings() { $('#modSection').hidden = !chatAdmin; renderPreview(); }
+const renderMenuCategory = () => { $('#menuCategory').textContent = me.category?.name ?? 'не создана'; };
 
 /* ---------- tooltip ---------- */
 const tooltip = $('#tooltip');
@@ -430,7 +439,7 @@ function renderPicker(container, key, groups, noneLabel) {
 }
 
 const KIND_ORDER = { sub: 0, drop: 1, global: 2 };
-const slotOf = (b) => (b.kind === 'global' ? 'globalBadge' : 'channelBadge');
+const slotOf = (b) => (SLOT_OF_UPLOAD[b.kind] === 'sub' ? 'subBadge' : 'otherBadge');
 
 // Each uploader category is its own section right under the role picker.
 function renderCategories() {
@@ -458,7 +467,8 @@ function renderPreview() {
   const badges = currentBadges();
   $('#preview').replaceChildren(...badges.map(badgeImg),
     el('span', { className: 'name', textContent: profile.nick, style: `color:${readable(profile.color)}` }));
-  $('#identityBtn').replaceChildren(...badges.map(badgeImg));
+  // Twitch's input shows a single badge here (ChatBadgeCarousel): the first one, role > channel > global
+  $('#identityBtn').replaceChildren(...badges.slice(0, 1).map(badgeImg));
   if (!badges.length) $('#identityBtn').innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" fill-rule="evenodd" d="M6 8a6 6 0 1 1 12 0A6 6 0 0 1 6 8Zm6 4a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm-5 4a4 4 0 0 0-4 4v2h2v-2a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2h2v-2a4 4 0 0 0-4-4H7Z" clip-rule="evenodd"/></svg>';
   $('#modTools').hidden = !chatAdmin;
   $('#settingsBadges').replaceChildren(...badges.map(badgeImg));
@@ -472,11 +482,13 @@ function renderIdentity() {
   }
   renderPicker($('#roleGrid'), 'role', [{ badges: twitchSets(ROLE_SETS) }], 'Зритель');
   renderCategories();
-  renderPicker($('#channelGrid'), 'channelBadge', [
-    { name: 'Подписка', badges: twitchSets(['subscriber', 'founder']) },
-    { name: 'Bits и подарки', badges: twitchSets(CHANNEL_SETS.slice(2)) },
+  renderPicker($('#channelGrid'), 'subBadge', [
+    { name: 'Twitch (по умолчанию)', badges: twitchSets(SUB_SETS) },
   ], 'Без значка');
-  renderPicker($('#globalGrid'), 'globalBadge', [{ badges: twitchGlobal() }], 'Без значка');
+  renderPicker($('#globalGrid'), 'otherBadge', [
+    { name: 'Bits, подарки, прогнозы', badges: twitchSets(CHANNEL_SETS) },
+    { name: 'Общие значки Twitch', badges: twitchGlobal() },
+  ], 'Без значка');
   filterGlobal();
 
   $('#colorGrid').replaceChildren(...COLORS.map((c) => {
@@ -512,6 +524,7 @@ $('#customColor').addEventListener('input', (e) => pick('color', e.target.value.
 function renderAll() {
   renderIdentity();
   renderManager();
+  renderMenuCategory();
 }
 
 /* ---------- badge manager dialog ---------- */
@@ -726,6 +739,109 @@ for (const form of document.querySelectorAll('.upload')) {
     });
   });
 }
+
+/* ---------- bulk import: PNG files or a ZIP archive ---------- */
+// Minimal ZIP reader (stored / deflate entries) on top of the browser's DecompressionStream.
+async function unzip(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error('Не ZIP-архив');
+  const count = dv.getUint16(eocd + 10, true);
+  let off = dv.getUint32(eocd + 16, true);
+  const files = [];
+  for (let n = 0; n < count; n++) {
+    if (dv.getUint32(off, true) !== 0x02014b50) throw new Error('Повреждённый ZIP');
+    const method = dv.getUint16(off + 10, true), size = dv.getUint32(off + 20, true);
+    const nameLen = dv.getUint16(off + 28, true), extraLen = dv.getUint16(off + 30, true), commentLen = dv.getUint16(off + 32, true);
+    const local = dv.getUint32(off + 42, true);
+    const name = new TextDecoder().decode(bytes.subarray(off + 46, off + 46 + nameLen));
+    off += 46 + nameLen + extraLen + commentLen;
+    if (name.endsWith('/') || name.startsWith('__MACOSX/')) continue;
+    const dataStart = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
+    const raw = bytes.subarray(dataStart, dataStart + size);
+    if (size > 2 * 1024 * 1024) { files.push({ name, error: 'файл слишком большой' }); continue; }
+    if (method === 0) files.push({ name, bytes: raw.slice() });
+    else if (method === 8) {
+      const stream = new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+      files.push({ name, bytes: new Uint8Array(await new Response(stream).arrayBuffer()) });
+    } else files.push({ name, error: 'неподдерживаемое сжатие' });
+  }
+  return files;
+}
+
+const SIZE_SUFFIX = /^(.*?)[\s_\-@.]*(18|36|72)(?:x(?:18|36|72))?(?:px)?$/i;
+
+// Groups files into badges: 18/36/72 triples -> subscriber badges, any other PNG -> category badge.
+function planImport(files) {
+  const groups = new Map(), singles = [];
+  for (const f of files) {
+    const base = f.name.split('/').pop().replace(/\.png$/i, '');
+    const m = base.match(SIZE_SUFFIX);
+    if (m && m[1]) {
+      const key = m[1].toLowerCase();
+      if (!groups.has(key)) groups.set(key, { name: m[1], sizes: {} });
+      groups.get(key).sizes[m[2]] = f;
+    } else singles.push({ ...f, title: base.slice(0, 40) });
+  }
+  const plan = [];
+  for (const g of groups.values()) {
+    if (g.sizes[18] && g.sizes[36] && g.sizes[72]) plan.push({ kind: 'sub', name: g.name, files: [g.sizes[18], g.sizes[36], g.sizes[72]] });
+    else singles.push(...Object.values(g.sizes).map((f) => ({ ...f, title: f.name.split('/').pop().replace(/\.png$/i, '').slice(0, 40) })));
+  }
+  for (const f of singles) plan.push({ kind: 'global', name: f.title, files: [f] });
+  return plan;
+}
+
+async function bulkImport(fileList) {
+  const report = $('#bulkReport');
+  const line = (ok, text) => report.append(el('li', { className: ok ? 'ok' : 'err', textContent: (ok ? '✓ ' : '✕ ') + text }));
+  report.replaceChildren();
+  if (!me.category) { status('Сначала создайте свою категорию', true); return; }
+  const files = [];
+  for (const file of fileList) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (/\.zip$/i.test(file.name) || (bytes[0] === 0x50 && bytes[1] === 0x4b)) {
+      try { files.push(...(await unzip(bytes)).filter((f) => f.error || /\.png$/i.test(f.name))); } catch (err) { line(false, `${file.name}: ${err.message}`); }
+    } else files.push({ name: file.name, bytes });
+  }
+  for (const f of files.filter((x) => x.error)) line(false, `${f.name}: ${f.error}`);
+  const plan = planImport(files.filter((x) => !x.error));
+  if (!plan.length) { status('В выбранных файлах нет PNG', true); return; }
+  let added = 0;
+  for (const [i, item] of plan.entries()) {
+    status(`Загрузка ${i + 1} из ${plan.length}…`);
+    const own = ownBadges();
+    let input;
+    if (item.kind === 'sub') {
+      const fromName = Number((item.name.match(/\d+/) || [])[0]);
+      const used = new Set(own.filter((b) => b.kind === 'sub').map((b) => b.months));
+      const months = SUB_MONTHS.includes(fromName) && !used.has(fromName) ? fromName : SUB_MONTHS.find((mo) => !used.has(mo));
+      input = { kind: 'sub', months, images: { x1: item.files[0].bytes, x2: item.files[1].bytes, x4: item.files[2].bytes } };
+    } else input = { kind: 'global', title: item.name, desc: '', images: { x4: item.files[0].bytes } };
+    const label = item.kind === 'sub' ? `${item.name} → значок подписчика (${input.months} мес.)` : `${item.name} → значок категории`;
+    const check = validateBadge(input, own);
+    if (check.failed) { line(false, `${label}: ${check.items.filter((x) => x.level === 'err').map((x) => x.text).join('; ')}`); continue; }
+    try {
+      const images = Object.fromEntries(Object.entries(input.images).map(([k, b]) => [k, dataUrl(b).split(',')[1]]));
+      const badge = await api('/badges', { method: 'POST', body: { ...input, images } });
+      state.badges.push(badge); // keep validation of the next item consistent before the full refresh
+      added++;
+      line(true, label);
+    } catch (err) { line(false, `${label}: ${err.message}`); }
+  }
+  await refresh();
+  status(`Загружено ${added} из ${plan.length}.`, added < plan.length);
+}
+
+$('#bulkInput').addEventListener('change', (e) => { bulkImport([...e.target.files]); e.target.value = ''; });
+$('#bulkMenuInput').addEventListener('change', (e) => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  togglePopover(null);
+  $('#openAdmin').click(); // results are shown in the badge manager
+  bulkImport(files);
+});
 
 /* ---------- boot ---------- */
 document.title = `${CHANNEL} — Чат трансляции`;

@@ -311,3 +311,12 @@ svg { display: block; }
 .vc-tile img { width: 24px; height: 24px; }
 .vc-footer { min-height: 34px; padding: 8px; font-size: 12px; color: var(--text-muted); background: var(--bg-alt); }
 .cat-head .field { flex: 1; min-width: 0; }
+
+.menu-value { font-size: 12px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.input-badge .badge { width: 20px; height: 20px; }
+.bulk { margin: 16px 0 6px; padding-top: 4px; border-top: 1px solid var(--border); }
+.bulk code { background: var(--bg-field); padding: 0 4px; border-radius: 3px; font-size: 12px; }
+.bulk-pick { display: inline-flex; align-items: center; margin-top: 10px; cursor: pointer; }
+.bulk-report { list-style: none; margin: 8px 0 0; padding: 0; font-size: 12px; max-height: 180px; overflow-y: auto; }
+.bulk-report li.ok { color: var(--ok); }
+.bulk-report li.err { color: #ff8280; }

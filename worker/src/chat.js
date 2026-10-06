@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { ROLE_SETS, CHANNEL_SETS, IMAGE_KEYS, describe } from '../../rules.js';
+import { ROLE_SETS, SUB_SETS, SLOT_OF_UPLOAD, IMAGE_KEYS, describe } from '../../rules.js';
 
 const MAX_MESSAGES = 150;            // Twitch keeps roughly this many lines in the chat buffer
 const MAX_TEXT = 500;                // Twitch chat message limit
@@ -140,17 +140,17 @@ export class ChatRoom extends DurableObject {
   }
 
   // Badges are resolved on the server from ids, so a message can only carry real Twitch / uploaded badges,
-  // at most one per slot (role, channel, global) — the same 3 slots Twitch has.
+  // at most one per slot (role, subscription, other) — the same 3 slots Twitch has.
   async resolveBadges(ids, base) {
     const out = [];
-    for (const slot of ['role', 'channel', 'global']) {
+    for (const slot of ['role', 'sub', 'other']) {
       const id = typeof ids[slot] === 'string' ? ids[slot] : '';
       if (!id) continue;
       if (id.startsWith('tw:')) {
         const [, set, version] = id.split(':');
         const fits = slot === 'role' ? ROLE_SETS.includes(set)
-          : slot === 'channel' ? CHANNEL_SETS.includes(set)
-            : !ROLE_SETS.includes(set) && !CHANNEL_SETS.includes(set);
+          : slot === 'sub' ? SUB_SETS.includes(set)
+            : !ROLE_SETS.includes(set) && !SUB_SETS.includes(set);
         if (!fits) continue;
         const v = (await this.twitchSets()).find((s) => s.set_id === set)?.versions.find((x) => x.id === version);
         if (v) {
@@ -164,7 +164,7 @@ export class ChatRoom extends DurableObject {
         const row = await this.env.DB.prepare('SELECT id, data FROM badges WHERE id = ?').bind(id).first();
         if (!row) continue;
         const data = JSON.parse(row.data);
-        if ((slot === 'global') !== (data.kind === 'global')) continue;
+        if (SLOT_OF_UPLOAD[data.kind] !== slot) continue;
         out.push({
           title: data.title, desc: describe(data),
           images: Object.fromEntries(IMAGE_KEYS[data.kind].map((k) => [k, `${base}/img/${row.id}/${k}`])),

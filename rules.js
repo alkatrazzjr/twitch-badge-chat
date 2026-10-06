@@ -18,7 +18,10 @@ export const TOP_SPOTS = [1, 3, 5, 10];
 export const SUB_MONTHS = [1, 2, 3, 6, 9, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66, 72, 78, 84, 90, 96, 102, 108, 114, 120];
 // Twitch global badge sets by identity-card slot (everything else is a global badge).
 export const ROLE_SETS = ['broadcaster', 'lead_moderator', 'moderator', 'vip', 'artist-badge', 'partner', 'staff', 'admin', 'global_mod'];
-export const CHANNEL_SETS = ['subscriber', 'founder', 'sub-gifter', 'sub-gift-leader', 'bits', 'bits-leader', 'predictions', 'hype-train', 'moments', 'clips-leader'];
+export const SUB_SETS = ['subscriber', 'founder'];
+export const CHANNEL_SETS = ['sub-gifter', 'sub-gift-leader', 'bits', 'bits-leader', 'predictions', 'hype-train', 'moments', 'clips-leader'];
+// Twitch shows up to 3 badges per chat line: role, subscription, and one more (drop / bits / gifts / global).
+export const SLOT_OF_UPLOAD = { sub: 'sub', drop: 'other', global: 'other' };
 
 export const IMAGE_KEYS = { drop: ['x4'], sub: ['x1', 'x2', 'x4'], global: ['x4'] };
 const SUB_SIZES = { x1: 18, x2: 36, x4: 72 };

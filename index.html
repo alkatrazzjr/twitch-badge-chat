@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=__V__">
 </head>
 <body>
 <div class="layout">
@@ -75,12 +75,12 @@
           <!-- uploaded categories: one section each -->
           <div id="categoryGrids"></div>
 
-          <h3>Значок канала</h3>
-          <p class="hint">Отображается только на этом канале. Можно выбрать один: подписка, Bits, подарки или Creator Badge Drop.</p>
+          <h3>Значок подписчика</h3>
+          <p class="hint">Отображается только на этом канале.</p>
           <div class="picker" id="channelGrid"></div>
 
-          <h3>Общий значок</h3>
-          <p class="hint">Этот значок отображается на всех каналах и в личных сообщениях.</p>
+          <h3>Дополнительный значок</h3>
+          <p class="hint">Один на выбор: Creator Badge Drop, Bits, подарки или общий значок Twitch.</p>
           <input class="field search" id="globalSearch" type="search" placeholder="Поиск значка" autocomplete="off">
           <div class="picker" id="globalGrid"></div>
 
@@ -108,7 +108,9 @@
           <div class="menu-section">
             <p class="menu-label">Мои настройки</p>
             <button class="menu-item" id="openIdentity2"><span>Имя в чате</span><span class="menu-right"><span class="menu-badges" id="settingsBadges"></span><svg class="chev" viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M9.293 17.293 14.586 12 9.293 6.707l1.414-1.414L17.414 12l-6.707 6.707-1.414-1.414Z"/></svg></span></button>
-            <button class="menu-item" id="openAdmin"><span>Значки: загрузить / удалить</span><span class="menu-right"><svg class="chev" viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M9.293 17.293 14.586 12 9.293 6.707l1.414-1.414L17.414 12l-6.707 6.707-1.414-1.414Z"/></svg></span></button>
+            <button class="menu-item" id="openAdmin"><span>Моя категория</span><span class="menu-right"><span class="menu-value" id="menuCategory">не создана</span><svg class="chev" viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M9.293 17.293 14.586 12 9.293 6.707l1.414-1.414L17.414 12l-6.707 6.707-1.414-1.414Z"/></svg></span></button>
+            <label class="menu-item" id="bulkMenu"><span>Загрузить значки (PNG или ZIP)</span><span class="menu-right"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M11 15V7.414L8.207 10.207 6.793 8.793 12 3.586l5.207 5.207-1.414 1.414L13 7.414V15h-2Z"/><path d="M4 14v6h16v-6h2v8H2v-8h2Z"/></svg></span>
+              <input type="file" id="bulkMenuInput" accept=".png,.zip,image/png,application/zip" multiple hidden></label>
             <label class="menu-item toggle"><span>Метки времени</span><input type="checkbox" role="switch" id="tsToggle"></label>
           </div>
         </div>
@@ -221,6 +223,18 @@
         <button class="btn primary">Загрузить значок</button>
       </form>
 
+      <section class="bulk">
+        <h3>Массовая загрузка</h3>
+        <p class="spec">Можно выбрать несколько <b>PNG</b> или <b>ZIP-архив</b> с ними.
+          Три файла одного значка с размерами в имени — <code>6_18.png</code>, <code>6_36.png</code>, <code>6_72.png</code>
+          (или <code>6-18x18.png</code>) — станут <b>значком подписчика</b> (число в имени = месяцы, иначе ближайший свободный стаж).
+          Любой другой квадратный PNG станет значком категории с названием из имени файла.
+          Каждый файл проверяется по правилам Twitch.</p>
+        <label class="btn bulk-pick">Выбрать файлы или архив
+          <input type="file" id="bulkInput" accept=".png,.zip,image/png,application/zip" multiple hidden></label>
+        <ul class="bulk-report" id="bulkReport"></ul>
+      </section>
+
       <h3>Все значки</h3>
       <div id="badgeList" class="badge-list"></div>
     <p class="status" id="adminStatus" aria-live="polite"></p>
@@ -228,6 +242,6 @@
 </dialog>
 
 <div class="tooltip" id="tooltip" hidden></div>
-<script type="module" src="app.js"></script>
+<script type="module" src="app.js?v=__V__"></script>
 </body>
 </html>
