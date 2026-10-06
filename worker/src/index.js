@@ -149,6 +149,27 @@ const routes = {
   },
 };
 
+// Twitch global badges (roles, bits, sub defaults, event badges) via the public IVR mirror of Helix
+// /chat/badges/global, trimmed and cached at the edge for a day.
+async function twitchBadges(req, ctx, headers) {
+  const cacheKey = new Request('https://cache.internal/twitch-global-badges-v1');
+  let res = await caches.default.match(cacheKey);
+  if (!res) {
+    const upstream = await fetch('https://api.ivr.fi/v2/twitch/badges/global', { headers: { 'User-Agent': 'twitch-badge-chat' } });
+    if (!upstream.ok) return Response.json({ error: 'Значки Twitch недоступны' }, { status: 502, headers });
+    const sets = (await upstream.json()).map((s) => ({
+      set: s.set_id,
+      versions: s.versions.map((v) => ({
+        id: v.id, title: v.title, desc: (v.description || '').trim(),
+        x1: v.image_url_1x, x2: v.image_url_2x, x4: v.image_url_4x,
+      })),
+    }));
+    res = Response.json(sets, { headers: { 'Cache-Control': 'public, max-age=86400' } });
+    ctx.waitUntil(caches.default.put(cacheKey, res.clone()));
+  }
+  return new Response(res.body, { headers: { ...headers, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' } });
+}
+
 async function image(env, id, key) {
   const row = await env.DB.prepare('SELECT bytes FROM images WHERE badge_id = ? AND key = ?').bind(id, key).first();
   if (!row) return new Response('Not found', { status: 404 });
@@ -162,10 +183,11 @@ async function image(env, id, key) {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
     const headers = cors(req, env);
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
+    if (url.pathname === '/twitch' && req.method === 'GET') return twitchBadges(req, ctx, headers);
 
     const img = url.pathname.match(/^\/img\/([a-z0-9]+)\/(x[124])$/);
     if (img && req.method === 'GET') return image(env, img[1], img[2]);

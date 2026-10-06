@@ -30,14 +30,11 @@ const MAX_MESSAGE_LEN = 500;         // Twitch chat message limit
 const COLORS = ['#FF0000', '#0000FF', '#008000', '#B22222', '#FF7F50', '#9ACD32', '#FF4500',
   '#2E8B57', '#DAA520', '#D2691E', '#5F9EA0', '#1E90FF', '#FF69B4', '#8A2BE2', '#00FF7F'];
 
-const svgBadge = (bg, path) => 'data:image/svg+xml,' + encodeURIComponent(
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><rect width="18" height="18" rx="2" fill="${bg}"/>${path}</svg>`);
-
-const ROLES = {
-  broadcaster: { title: 'Стример', src: svgBadge('#e91916', '<path fill="#fff" d="M3 5h8v8H3zM11 7.5l4-2.5v8l-4-2.5z"/>') },
-  moderator: { title: 'Модератор', src: svgBadge('#00ad03', '<path fill="#fff" d="M13.5 3H15v1.5L8.6 10.9l1.4 1.4-1.1 1.1-1.2-1.2-2.6 2.6-1.3-1.3 2.6-2.6-1.2-1.2 1.1-1.1 1.4 1.4z"/>') },
-  vip: { title: 'VIP', src: svgBadge('#e005b9', '<path fill="#fff" d="M5.5 4h7L15 7.5 9 14.5 3 7.5z"/>') },
-};
+// Twitch global badge sets grouped the way the identity card offers them.
+const ROLE_SETS = ['broadcaster', 'lead_moderator', 'moderator', 'vip', 'artist-badge', 'partner', 'staff', 'admin', 'global_mod'];
+const CHANNEL_SETS = ['subscriber', 'founder'];
+const EXTRA_SETS = ['sub-gifter', 'sub-gift-leader', 'bits', 'bits-leader', 'predictions', 'hype-train', 'moments', 'clips-leader'];
+const SLOTS = ['role', 'channelBadge', 'extraBadge', 'globalBadge']; // Twitch display order in a chat line
 
 /* ---------- identity for uploads: a random secret kept in this browser (+ optional owner admin key) ---------- */
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -62,13 +59,35 @@ async function api(path, { method = 'GET', body } = {}) {
 /* ---------- data ---------- */
 let state = store.get('tbc.state', { categories: [], badges: [] }); // cached copy renders instantly, then refreshed
 let me = { category: null, admin: false };
+let twitch = store.get('tbc.twitch', []); // [{ set, versions: [{ id, title, desc, x1, x2, x4 }] }]
+
+const twitchBadge = (set, v) => ({
+  id: `tw:${set}:${v.id}`, kind: 'twitch', set, title: v.title, desc: v.desc, images: { x1: v.x1, x2: v.x2, x4: v.x4 },
+});
+const versionOrder = (a, b) => (Number(a.id) - Number(b.id)) || a.id.localeCompare(b.id, 'en', { numeric: true });
+const twitchSets = (names) => names.flatMap((n) => twitch.find((s) => s.set === n)?.versions.slice().sort(versionOrder).map((v) => twitchBadge(n, v)) ?? []);
+const twitchGlobal = () => {
+  const taken = new Set([...ROLE_SETS, ...CHANNEL_SETS, ...EXTRA_SETS]);
+  return twitch.filter((s) => !taken.has(s.set)).flatMap((s) => s.versions.slice().sort(versionOrder).map((v) => twitchBadge(s.set, v)));
+};
+
+async function loadTwitch() {
+  try {
+    twitch = await (await fetch(`${API}/twitch`)).json();
+    if (!Array.isArray(twitch)) throw new Error('bad payload');
+    store.set('tbc.twitch', twitch);
+    renderIdentity();
+  } catch { /* keep the cached copy */ }
+}
 
 async function refresh() {
   try {
     const [s, m] = await Promise.all([api('/state'), api('/me')]);
+    $('#apiError').hidden = true;
+    // periodic refreshes must not rebuild the open pickers (scroll, search) when nothing changed
+    if (JSON.stringify([s, m]) === JSON.stringify([state, me])) return;
     state = s; me = m;
     store.set('tbc.state', state);
-    $('#apiError').hidden = true;
   } catch (err) {
     $('#apiError').hidden = false;
     $('#apiError').textContent = `Сервер значков недоступен: ${err.message}`;
@@ -95,6 +114,7 @@ function describe(b) {
     return `Creator Badge Drop «${b.event.name}» · ${how}`;
   }
   if (b.kind === 'sub') return 'Значок подписчика';
+  if (b.kind === 'twitch') return b.desc && b.desc !== b.title ? b.desc : 'Значок Twitch';
   return b.desc || 'Общий значок';
 }
 
@@ -102,21 +122,17 @@ function describe(b) {
 const badgeView = (b) => ({ images: b.images, title: b.title, desc: describe(b) });
 const bigSrc = (imgs) => imgs.x4 || imgs.x2 || imgs.x1;
 
-const byId = (id) => state.badges.find((b) => b.id === id);
+function byId(id) {
+  if (!id) return null;
+  if (!id.startsWith('tw:')) return state.badges.find((b) => b.id === id);
+  const [, set, version] = id.split(':');
+  const v = twitch.find((s) => s.set === set)?.versions.find((x) => x.id === version);
+  return v ? twitchBadge(set, v) : null;
+}
 const categoryName = (id) => state.categories.find((c) => c.id === id)?.name ?? '—';
 const ownBadges = () => (me.category ? state.badges.filter((b) => b.categoryId === me.category.id) : []);
 
-// Twitch display order: role -> channel (sub / drop) -> global
-function currentBadges() {
-  const out = [];
-  const role = ROLES[profile.role];
-  if (role) out.push({ images: { x4: role.src }, title: role.title, desc: '' });
-  for (const id of [profile.channelBadge, profile.globalBadge]) {
-    const b = id && byId(id);
-    if (b) out.push(badgeView(b));
-  }
-  return out;
-}
+const currentBadges = () => SLOTS.map((k) => byId(profile[k])).filter(Boolean).map(badgeView);
 
 function badgeImg(v) {
   const imgs = v.images;
@@ -132,9 +148,11 @@ function badgeImg(v) {
 
 /* ---------- state ---------- */
 const profile = Object.assign(
-  { nick: 'Viewer', color: '#FF0000', role: null, channelBadge: null, globalBadge: null },
+  { nick: 'Viewer', color: '#FF0000', role: null, channelBadge: null, extraBadge: null, globalBadge: null },
   store.get('tbc.profile', {}),
 );
+// v1 stored roles as plain names with home-made icons
+if (profile.role && !profile.role.startsWith('tw:')) profile.role = `tw:${profile.role}:1`;
 let messages = store.get('tbc.messages', []);
 const settings = Object.assign({ timestamps: true }, store.get('tbc.settings', {}));
 const saveProfile = () => store.set('tbc.profile', profile);
@@ -159,16 +177,18 @@ const fmtTime = (t) => new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit'
 
 const trashIcon = () => {
   const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  s.setAttribute('viewBox', '0 0 20 20'); s.setAttribute('width', '16'); s.setAttribute('height', '16');
-  s.innerHTML = '<path fill="currentColor" d="M12 2H8v1H3v2h14V3h-5V2zM4 7v9a2 2 0 002 2h8a2 2 0 002-2V7h-2v9H6V7H4z"/><path fill="currentColor" d="M11 7H9v7h2V7z"/>';
+  s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('width', '16'); s.setAttribute('height', '16');
+  s.innerHTML = '<path fill="currentColor" d="M9 2h6v2h6v2H3V4h6V2ZM5 8h2v12h10V8h2v14H5V8Zm4 2h2v8H9v-8Zm4 0h2v8h-2v-8Z"/>';
   return s;
 };
+
+const isMod = () => ['tw:broadcaster:1', 'tw:moderator:1', 'tw:lead_moderator:1'].includes(profile.role);
 
 function lineEl(m) {
   const line = el('div', { className: 'line' });
   line.dataset.id = m.id;
   line.append(el('span', { className: 'ts', textContent: fmtTime(m.t) }));
-  if (profile.role === 'broadcaster' || profile.role === 'moderator') {
+  if (isMod()) {
     line.append(el('button', { className: 'mod-btn', title: 'Удалить сообщение', ariaLabel: 'Удалить сообщение' }, trashIcon()));
   }
   for (const b of m.badges) line.append(badgeImg(b));
@@ -268,71 +288,98 @@ document.addEventListener('pointerover', (e) => {
 });
 
 /* ---------- identity card ---------- */
-function optButton(pressed, label, content, onPick) {
-  const btn = el('button', { type: 'button', className: 'badge-opt', title: label, ariaLabel: label });
-  btn.setAttribute('aria-pressed', String(pressed));
-  if (content) btn.append(content); else { btn.classList.add('none'); btn.textContent = '⦸'; }
-  btn.onclick = onPick;
+function badgeTile(b, key) {
+  const v = badgeView(b);
+  const btn = el('button', { type: 'button', className: 'badge-opt', title: v.title, ariaLabel: v.title });
+  btn.dataset.id = b.id;
+  btn.dataset.search = `${v.title} ${b.set ?? ''}`.toLowerCase();
+  btn.setAttribute('aria-pressed', String(profile[key] === b.id));
+  const img = el('img', { src: b.images.x2 || bigSrc(b.images), alt: '', loading: 'lazy', width: 28, height: 28 });
+  if (b.images.x4) img.srcset = `${b.images.x2 || b.images.x4} 1x, ${b.images.x4} 2x`;
+  Object.assign(img.dataset, { title: v.title, desc: v.desc, big: bigSrc(b.images) });
+  btn.append(img);
+  btn.onclick = () => pick(key, b.id);
   return btn;
 }
 
-// One grid per uploader category, like Twitch groups badges by source.
-function badgeOptions(container, kinds, key) {
-  const none = el('div', { className: 'badge-grid' }, optButton(!profile[key], 'Без значка', null, () => pick(key, null)));
-  const groups = state.categories.map((cat) => {
-    const badges = state.badges.filter((b) => b.categoryId === cat.id && kinds.includes(b.kind))
-      .sort((a, b) => (a.kind === b.kind ? (a.months ?? 0) - (b.months ?? 0) : a.kind === 'sub' ? -1 : 1));
-    if (!badges.length) return null;
-    return el('div', { className: 'badge-group' },
-      el('div', { className: 'group-name', textContent: cat.name }),
-      el('div', { className: 'badge-grid' }, ...badges.map((b) => {
-        const v = badgeView(b);
-        const img = el('img', { src: bigSrc(v.images), alt: '' });
-        Object.assign(img.dataset, { title: v.title, desc: v.desc, big: img.src });
-        return optButton(profile[key] === b.id, `${v.title} — ${v.desc}`, img, () => pick(key, b.id));
-      })));
-  }).filter(Boolean);
-  container.replaceChildren(none, ...(groups.length ? groups : [el('p', { className: 'empty', textContent: 'Значков пока нет' })]));
+function noneTile(key, label) {
+  const btn = el('button', { type: 'button', className: 'badge-opt none', title: label, ariaLabel: label });
+  btn.dataset.id = '';
+  btn.setAttribute('aria-pressed', String(!profile[key]));
+  btn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" fill-rule="evenodd" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20ZM4 12a8 8 0 0 1 12.9-6.3L5.7 16.9A8 8 0 0 1 4 12Zm3.1 6.3L18.3 7.1A8 8 0 0 1 7.1 18.3Z" clip-rule="evenodd"/></svg>';
+  btn.onclick = () => pick(key, null);
+  return btn;
 }
+
+// groups: [{ name, badges }] — rendered as one tile grid per group, empty groups skipped
+function renderPicker(container, key, groups, noneLabel) {
+  const filled = groups.filter((g) => g.badges.length);
+  const none = noneTile(key, noneLabel);
+  if (!filled.length) { container.replaceChildren(el('div', { className: 'badge-grid' }, none)); return; }
+  // the "no badge" tile leads the first grid, like on Twitch
+  container.replaceChildren(...filled.map((g, i) => el('div', { className: 'badge-group' },
+    g.name ? el('div', { className: 'group-name', textContent: g.name }) : null,
+    el('div', { className: 'badge-grid' }, ...(i === 0 ? [none] : []), ...g.badges.map((b) => badgeTile(b, key))))));
+}
+
+const uploaded = (kinds) => state.categories.map((cat) => ({
+  name: cat.name,
+  badges: state.badges.filter((b) => b.categoryId === cat.id && kinds.includes(b.kind))
+    .sort((a, b) => (a.kind === b.kind ? (a.months ?? 0) - (b.months ?? 0) : a.kind === 'sub' ? -1 : 1)),
+}));
 
 function pick(key, value) {
   profile[key] = value;
   saveProfile();
-  renderIdentity();
+  for (const btn of document.querySelectorAll(`[data-slot="${key}"] .badge-opt`)) {
+    btn.setAttribute('aria-pressed', String(btn.dataset.id === (value ?? '')));
+  }
+  renderPreview();
+  if (key === 'role') renderMessages(); // mod tools depend on the role
 }
 
-function renderIdentity() {
-  // drop references to badges that no longer exist
-  for (const k of ['channelBadge', 'globalBadge']) if (profile[k] && !byId(profile[k])) { profile[k] = null; saveProfile(); }
-
+function renderPreview() {
   const badges = currentBadges();
   $('#preview').replaceChildren(...badges.map(badgeImg),
     el('span', { className: 'name', textContent: profile.nick, style: `color:${readable(profile.color)}` }));
   $('#identityBtn').replaceChildren(...badges.map(badgeImg));
-  if (!badges.length) $('#identityBtn').textContent = '☺';
+  if (!badges.length) $('#identityBtn').innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" fill-rule="evenodd" d="M6 8a6 6 0 1 1 12 0A6 6 0 0 1 6 8Zm6 4a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm-5 4a4 4 0 0 0-4 4v2h2v-2a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2h2v-2a4 4 0 0 0-4-4H7Z" clip-rule="evenodd"/></svg>';
+  $('#modTools').hidden = !isMod();
+  for (const b of document.querySelectorAll('.color-opt')) b.setAttribute('aria-pressed', String(profile.color.toUpperCase() === b.title));
+}
 
-  const roleGrid = $('#roleGrid');
-  roleGrid.replaceChildren(optButton(!ROLES[profile.role], 'Зритель', null, () => { pick('role', null); renderMessages(); }));
-  for (const [key, r] of Object.entries(ROLES)) {
-    roleGrid.append(optButton(profile.role === key, r.title, el('img', { src: r.src, alt: '' }), () => { pick('role', key); renderMessages(); }));
+function renderIdentity() {
+  // drop references to badges that no longer exist (only once Twitch data is known)
+  for (const k of SLOTS) {
+    if (profile[k] && !byId(profile[k]) && (twitch.length || !profile[k].startsWith('tw:'))) { profile[k] = null; saveProfile(); }
   }
-  badgeOptions($('#channelGrid'), ['sub', 'drop'], 'channelBadge');
-  badgeOptions($('#globalGrid'), ['global'], 'globalBadge');
+  renderPicker($('#roleGrid'), 'role', [{ badges: twitchSets(ROLE_SETS) }], 'Зритель');
+  renderPicker($('#channelGrid'), 'channelBadge', [...uploaded(['sub', 'drop']), { name: 'Twitch (по умолчанию)', badges: twitchSets(CHANNEL_SETS) }], 'Без значка');
+  renderPicker($('#extraGrid'), 'extraBadge', [{ badges: twitchSets(EXTRA_SETS) }], 'Без значка');
+  renderPicker($('#globalGrid'), 'globalBadge', [...uploaded(['global']), { name: 'Twitch', badges: twitchGlobal() }], 'Без значка');
+  filterGlobal();
 
   $('#colorGrid').replaceChildren(...COLORS.map((c) => {
     const b = el('button', { type: 'button', className: 'color-opt', title: c, ariaLabel: `Цвет ${c}`, style: `background:${c}` });
-    b.setAttribute('aria-pressed', String(profile.color.toUpperCase() === c));
-    b.onclick = () => pick('color', c);
+    b.onclick = () => { pick('color', c); $('#customColor').value = c.toLowerCase(); };
     return b;
   }));
   $('#customColor').value = profile.color.toLowerCase();
   const nick = $('#nickInput');
   if (document.activeElement !== nick) nick.value = profile.nick;
+  renderPreview();
 }
+
+function filterGlobal() {
+  const q = $('#globalSearch').value.trim().toLowerCase();
+  for (const btn of $('#globalGrid').querySelectorAll('.badge-opt[data-search]')) btn.hidden = Boolean(q) && !btn.dataset.search.includes(q);
+  for (const g of $('#globalGrid').querySelectorAll('.badge-group')) g.hidden = !g.querySelector('.badge-opt:not([hidden])');
+}
+$('#globalSearch').addEventListener('input', filterGlobal);
 
 $('#nickInput').addEventListener('input', (e) => {
   const v = e.target.value.trim();
-  if (v) { profile.nick = v; saveProfile(); renderIdentity(); }
+  if (v) { profile.nick = v; saveProfile(); renderPreview(); }
 });
 $('#nickInput').addEventListener('blur', (e) => { e.target.value = profile.nick; });
 $('#customColor').addEventListener('input', (e) => pick('color', e.target.value.toUpperCase()));
@@ -413,7 +460,11 @@ function renderManager() {
   }) : [el('span', { className: 'empty', textContent: 'Значков пока нет' })]));
 }
 
-$('#openAdmin').onclick = () => { togglePopover(null); status(''); renderManager(); dialog.showModal(); refresh(); };
+$('#openAdmin').onclick = () => {
+  togglePopover(null); status('');
+  if (!me.category) $('#categoryInput').value = profile.nick;
+  renderManager(); dialog.showModal(); refresh();
+};
 $('[data-close-dialog]').onclick = () => dialog.close();
 dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
 
@@ -550,5 +601,6 @@ renderAll();
 renderMessages();
 syncInput();
 refresh();
+loadTwitch();
 addEventListener('focus', refresh);
 setInterval(() => { if (!document.hidden) refresh(); }, 60000);

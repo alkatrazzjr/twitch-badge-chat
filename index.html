@@ -22,11 +22,11 @@
   <aside class="chat" aria-label="Чат трансляции">
     <header class="chat-header">
       <button class="icon-btn" id="collapseBtn" title="Свернуть чат" aria-label="Свернуть чат">
-        <svg viewBox="0 0 20 20" width="20" height="20"><path fill="currentColor" d="M4 16V4H2v12h2zM13 15l-1.5-1.5L14 11H6V9h8l-2.5-2.5L13 5l5 5-5 5z"/></svg>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M3 5h2v14H3V5Zm19.414 7-6.707-6.707-1.414 1.414L18.586 11H7v2h11.586l-4.293 4.293 1.414 1.414L22.414 12Z"/></svg>
       </button>
       <h1>Чат трансляции</h1>
       <button class="icon-btn" id="usersBtn" title="Пользователи в чате" aria-label="Пользователи в чате">
-        <svg viewBox="0 0 20 20" width="20" height="20"><path fill="currentColor" fill-rule="evenodd" d="M7 2a4 4 0 100 8 4 4 0 000-8zM5 6a2 2 0 114 0 2 2 0 01-4 0zm-3 10a5 5 0 0110 0v2h2v-2a7 7 0 00-14 0v2h2v-2zm11.5-3.5L15 11l2 2 3-3-1.5-1.5L17 10l-.5-.5zM14 4h4v2h-4z" clip-rule="evenodd"/></svg>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path fill-rule="evenodd" d="M6 8a6 6 0 1 1 7.025 5.913l.012.036A3 3 0 0 0 15.883 16H17a4 4 0 0 1 4 4v2h-2v-2a2 2 0 0 0-2-2h-1.117A5 5 0 0 1 12 16.15 5 5 0 0 1 8.117 18H7a2 2 0 0 0-2 2v2H3v-2a4 4 0 0 1 4-4h1.117a3 3 0 0 0 2.846-2.051l.012-.036A6.002 6.002 0 0 1 6 8Zm6 4a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z" clip-rule="evenodd"/></svg>
       </button>
     </header>
 
@@ -42,29 +42,34 @@
       <section class="popover identity" id="identity" hidden aria-label="Имя в чате">
         <div class="pop-head">
           <span>Имя в чате</span>
-          <button class="icon-btn" data-close="identity" aria-label="Закрыть">✕</button>
+          <button class="icon-btn" data-close="identity" aria-label="Закрыть"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M13.414 12l5.293-5.293-1.414-1.414L12 10.586 6.707 5.293 5.293 6.707 10.586 12l-5.293 5.293 1.414 1.414L12 13.414l5.293 5.293 1.414-1.414L13.414 12Z"/></svg></button>
+        </div>
+        <div class="identity-preview">
+          <h3>Предпросмотр имени в чате</h3>
+          <p>Как ваше имя будет отображаться в чате на канале <span id="channelName2"></span>:</p>
+          <div class="preview" id="preview"></div>
         </div>
         <div class="pop-body">
-          <h3>Предпросмотр имени в чате</h3>
-          <p class="muted">Как ваше имя будет отображаться в чате на канале <b id="channelName2"></b>:</p>
-          <div class="preview" id="preview"></div>
-
           <h3>Ник</h3>
           <input class="field" id="nickInput" maxlength="25" autocomplete="off" spellcheck="false">
 
           <h3>Роль в канале</h3>
-          <div class="badge-grid" id="roleGrid"></div>
+          <div class="picker" id="roleGrid" data-slot="role"></div>
 
           <h3>Значок канала</h3>
-          <p class="muted">Отображается только на этом канале (подписка, Creator Badge Drops).</p>
-          <div class="badge-grid" id="channelGrid"></div>
+          <p class="hint">Отображается только на этом канале: подписка и Creator Badge Drops.</p>
+          <div class="picker" id="channelGrid" data-slot="channelBadge"></div>
+
+          <h3>Bits, подарки и прогнозы</h3>
+          <div class="picker" id="extraGrid" data-slot="extraBadge"></div>
 
           <h3>Общий значок</h3>
-          <p class="muted">Этот значок отображается на всех каналах и в личных сообщениях.</p>
-          <div class="badge-grid" id="globalGrid"></div>
+          <p class="hint">Этот значок отображается на всех каналах и в личных сообщениях.</p>
+          <input class="field search" id="globalSearch" type="search" placeholder="Поиск значка" autocomplete="off">
+          <div class="picker" id="globalGrid" data-slot="globalBadge"></div>
 
           <h3>Глобальный цвет имени</h3>
-          <p class="muted">Выберите любой цвет! Обновление цвета в комнате чата может занимать несколько минут.</p>
+          <p class="hint">Выберите любой цвет! Обновление цвета в комнате чата может занимать несколько минут.</p>
           <div class="colors" id="colorGrid"></div>
           <label class="more-colors">
             <input type="color" id="customColor">
@@ -77,7 +82,7 @@
       <section class="popover menu" id="settings" hidden aria-label="Настройки чата">
         <div class="pop-head">
           <span>Настройки чата</span>
-          <button class="icon-btn" data-close="settings" aria-label="Закрыть">✕</button>
+          <button class="icon-btn" data-close="settings" aria-label="Закрыть"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M13.414 12l5.293-5.293-1.414-1.414L12 10.586 6.707 5.293 5.293 6.707 10.586 12l-5.293 5.293 1.414 1.414L12 13.414l5.293 5.293 1.414-1.414L13.414 12Z"/></svg></button>
         </div>
         <div class="pop-body">
           <label class="toggle-row"><span>Показывать метки времени</span><input type="checkbox" id="tsToggle"></label>
@@ -91,13 +96,16 @@
         <button type="button" class="input-badge" id="identityBtn" title="Имя в чате" aria-label="Имя в чате"></button>
         <textarea id="msgInput" rows="1" maxlength="500" placeholder="Отправить сообщение" aria-label="Отправить сообщение"></textarea>
         <span class="emote-btn" aria-hidden="true">
-          <svg viewBox="0 0 20 20" width="20" height="20"><path fill="currentColor" d="M7 11a1 1 0 100-2 1 1 0 000 2zm7-1a1 1 0 11-2 0 1 1 0 012 0zm-1.4 2.5c-.6.9-1.6 1.5-2.6 1.5s-2-.6-2.6-1.5l-1.6 1.2C6.8 15.1 8.4 16 10 16s3.2-.9 4.2-2.3l-1.6-1.2z"/><path fill="currentColor" fill-rule="evenodd" d="M10 2a8 8 0 100 16 8 8 0 000-16zM4 10a6 6 0 1112 0 6 6 0 01-12 0z" clip-rule="evenodd"/></svg>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 19a3 3 0 0 0 3-3H9a3 3 0 0 0 3 3Zm-6-6.5a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0ZM16.5 11a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/><path fill-rule="evenodd" d="M1 12C1 5.925 5.925 1 12 1s11 4.925 11 11-4.925 11-11 11S1 18.075 1 12Zm11 9a9 9 0 1 1 0-18 9 9 0 0 1 0 18Z" clip-rule="evenodd"/></svg>
         </span>
       </form>
       <div class="chat-actions">
         <span class="counter" id="counter"></span>
+        <span class="mod-tools" id="modTools" hidden aria-hidden="true">
+          <span class="icon-btn" title="Защитный режим"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path fill-rule="evenodd" d="M19.004 4.867C19.663 4.955 20.329 5 21 5l-.436 4.802a14 14 0 0 1-5.543 9.932L12 22l-3.021-2.266a14 14 0 0 1-5.542-9.932L3 5a15 15 0 0 0 9-3 15 15 0 0 0 7.004 2.867ZM13 10V5a17 17 0 0 0 5.823 1.86l-.251 2.76a12 12 0 0 1-4.751 8.514L13 18.75V10Zm-2 0V5a17.001 17.001 0 0 1-5.823 1.86l.251 2.76a12 12 0 0 0 4.751 8.514l.821.616V10Z" clip-rule="evenodd"/></svg></span>
+        </span>
         <button class="icon-btn" id="settingsBtn" title="Настройки чата" aria-label="Настройки чата">
-          <svg viewBox="0 0 20 20" width="20" height="20"><path fill="currentColor" d="M10 8a2 2 0 100 4 2 2 0 000-4z"/><path fill="currentColor" fill-rule="evenodd" d="M9 2h2a2.01 2.01 0 001.329 1.747l.144.06a2.01 2.01 0 002.161-.336l1.414 1.414a2.01 2.01 0 00-.336 2.161l.06.144A2.01 2.01 0 0018 9v2a2.01 2.01 0 00-1.747 1.329l-.06.144a2.01 2.01 0 00.336 2.161l-1.414 1.414a2.01 2.01 0 00-2.161-.336l-.144.06A2.01 2.01 0 0011 18H9a2.01 2.01 0 00-1.329-1.747l-.144-.06a2.01 2.01 0 00-2.161.336L3.952 15.12a2.01 2.01 0 00.336-2.161l-.06-.144A2.01 2.01 0 002 11V9a2.01 2.01 0 001.747-1.329l.06-.144a2.01 2.01 0 00-.336-2.161L4.88 3.952a2.01 2.01 0 002.161.336l.144-.06A2.01 2.01 0 009 2zm-3 8a4 4 0 108 0 4 4 0 00-8 0z" clip-rule="evenodd"/></svg>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"/><path fill-rule="evenodd" d="M10.9 1h2.2v.228a3.362 3.362 0 0 0 5.739 2.378L19 3.444l1.556 1.555-.161.162a3.362 3.362 0 0 0 2.377 5.739H23v2.2h-.228a3.362 3.362 0 0 0-2.377 5.74l.161.16L19 20.557l-.16-.161a3.362 3.362 0 0 0-5.74 2.377V23h-2.2v-.228a3.362 3.362 0 0 0-5.74-2.377l-.16.16L3.444 19l.161-.16a3.362 3.362 0 0 0-2.377-5.74H1v-2.2h.228a3.362 3.362 0 0 0 2.377-5.739L3.445 5 5 3.444l.161.161A3.362 3.362 0 0 0 10.9 1.228V1ZM4.929 12 7 17l5 2.07L17 17l2.071-5L17 7l-5-2.071-5 2.07-2.071 5Z" clip-rule="evenodd"/></svg>
         </button>
         <button class="send-btn" form="chatForm" type="submit">Чат</button>
       </div>
@@ -109,7 +117,7 @@
 <dialog class="admin" id="admin">
   <div class="pop-head">
     <span>Значки</span>
-    <button class="icon-btn" data-close-dialog aria-label="Закрыть">✕</button>
+    <button class="icon-btn" data-close-dialog aria-label="Закрыть"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M13.414 12l5.293-5.293-1.414-1.414L12 10.586 6.707 5.293 5.293 6.707 10.586 12l-5.293 5.293 1.414 1.414L12 13.414l5.293 5.293 1.414-1.414L13.414 12Z"/></svg></button>
   </div>
   <div class="admin-body">
     <p class="admin-note" id="adminBadge" hidden>Режим владельца: можно удалять любые значки и категории.</p>
