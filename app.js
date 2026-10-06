@@ -837,7 +837,8 @@ const TWITCH_EMOTES = {
 const PROVIDERS = { twitch: 'Twitch', '7tv': '7TV', bttv: 'BTTV', ffz: 'FFZ' };
 let emotes = new Map(); // code -> { code, provider, scope, x1, x2, x4, zw }
 
-const getJson = async (url) => { const r = await fetch(url); if (!r.ok) throw new Error(String(r.status)); return r.json(); };
+// a slow provider must not hold back the others
+const getJson = async (url) => { const r = await fetch(url, { signal: AbortSignal.timeout(8000) }); if (!r.ok) throw new Error(String(r.status)); return r.json(); };
 const stvList = (set, scope) => (set?.emotes ?? []).map((e) => {
   const host = `https:${e.data.host.url}`;
   return { code: e.name, provider: '7tv', scope, x1: `${host}/1x.webp`, x2: `${host}/2x.webp`, x4: `${host}/4x.webp`, zw: Boolean((e.flags ?? 0) & 1) };
@@ -853,6 +854,11 @@ const ffzList = (sets, scope) => Object.values(sets ?? {}).flatMap((s) => s.emot
 async function loadEmotes() {
   const cached = store.get('tbc.emotes', null);
   if (cached && Date.now() - cached.at < 6 * 3600_000) { setEmotes(cached.list); return; }
+  const twitchList = Object.entries(TWITCH_EMOTES).map(([code, id]) => {
+    const u = (n) => `https://static-cdn.jtvnw.net/emoticons/v2/${id}/default/dark/${n}`;
+    return { code, provider: 'twitch', scope: 'global', x1: u('1.0'), x2: u('2.0'), x4: u('3.0'), zw: false };
+  });
+  setEmotes(twitchList); // usable right away, extension emotes follow
   const [stvG, stvC, bttvG, bttvC, ffzG, ffzC] = await Promise.allSettled([
     getJson('https://7tv.io/v3/emote-sets/global'),
     getJson(`https://7tv.io/v3/users/twitch/${CHANNEL_ID}`),
@@ -862,10 +868,6 @@ async function loadEmotes() {
     getJson(`https://api.frankerfacez.com/v1/room/id/${CHANNEL_ID}`),
   ]);
   const ok = (r) => (r.status === 'fulfilled' ? r.value : null);
-  const twitchList = Object.entries(TWITCH_EMOTES).map(([code, id]) => {
-    const u = (n) => `https://static-cdn.jtvnw.net/emoticons/v2/${id}/default/dark/${n}`;
-    return { code, provider: 'twitch', scope: 'global', x1: u('1.0'), x2: u('2.0'), x4: u('3.0'), zw: false };
-  });
   const ffzGlobal = ok(ffzG);
   // first one wins on name clashes, in the order chat extensions use: Twitch, channel emotes, then globals
   const list = [
@@ -877,7 +879,8 @@ async function loadEmotes() {
     ...bttvList(ok(bttvG) ?? [], 'global'),
     ...ffzList(ffzGlobal && Object.fromEntries(ffzGlobal.default_sets.map((id) => [id, ffzGlobal.sets[id]])), 'global'),
   ];
-  store.set('tbc.emotes', { at: Date.now(), list });
+  // cache only complete results, so a failed provider is retried on the next visit
+  if ([stvG, bttvG, ffzG].every((r) => r.status === 'fulfilled')) store.set('tbc.emotes', { at: Date.now(), list });
   setEmotes(list);
 }
 
