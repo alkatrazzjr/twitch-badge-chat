@@ -75,6 +75,29 @@
           <!-- uploaded categories: one section each -->
           <div id="categoryGrids"></div>
 
+          <section class="my-cat">
+            <div id="myCatCreate">
+              <h3>Своя категория значков</h3>
+              <p class="hint">Создайте категорию — она появится здесь у всех, а менять её сможете только вы.</p>
+              <form class="row" id="myCatForm">
+                <input class="field" id="myCatInput" maxlength="25" minlength="2" required placeholder="Название категории">
+                <button class="btn primary">Создать</button>
+              </form>
+            </div>
+            <div id="myCatUpload" hidden>
+              <h3>Моя категория: <span id="myCatName"></span></h3>
+              <p class="hint">PNG или ZIP-архив. Три файла <code>6_18.png</code>, <code>6_36.png</code>, <code>6_72.png</code> → значок подписчика,
+                любой другой квадратный PNG → значок категории.</p>
+              <div class="row">
+                <label class="btn primary file-btn">Загрузить значки
+                  <input type="file" id="myCatFiles" accept=".png,.zip,image/png,application/zip" multiple hidden></label>
+                <button type="button" class="btn" id="myCatManage">Управление</button>
+              </div>
+            </div>
+            <p class="status" id="myCatStatus" aria-live="polite"></p>
+            <ul class="bulk-report" id="myCatReport"></ul>
+          </section>
+
           <h3>Значок подписчика</h3>
           <p class="hint">Отображается только на этом канале.</p>
           <div class="picker" id="channelGrid"></div>

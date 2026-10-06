@@ -322,3 +322,15 @@ svg { display: block; }
 .bulk-report li.err { color: #ff8280; }
 
 .target-box { display: flex; flex-direction: column; gap: 4px; margin-top: 14px; font-weight: 600; font-size: 13px; }
+
+/* long badge groups: first row + "Показать все" */
+.badge-grid.collapsed { max-height: 34px; overflow: hidden; }
+.more-badges { margin-top: 4px; padding: 2px 0; border: 0; background: none; color: var(--link); font-size: 12px; font-weight: 600; cursor: pointer; }
+.more-badges:hover { text-decoration: underline; }
+.my-cat { margin-top: 14px; padding: 10px; border-radius: 6px; background: var(--bg-alt); }
+.my-cat h3 { margin-top: 0; }
+.my-cat code { background: var(--bg-field); padding: 0 3px; border-radius: 3px; font-size: 12px; }
+.my-cat .row { align-items: center; }
+.my-cat .row > .btn { flex: none; }
+.file-btn { display: inline-flex; align-items: center; cursor: pointer; }
+.my-cat .status { margin: 6px 0 0; font-size: 12px; min-height: 0; }

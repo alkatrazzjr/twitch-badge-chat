@@ -369,10 +369,10 @@ $('#chatForm').addEventListener('submit', (e) => {
 function togglePopover(id, force) {
   for (const p of document.querySelectorAll('.popover')) p.hidden = p.id === id ? !(force ?? p.hidden) : true;
 }
-$('#identityBtn').onclick = () => togglePopover('identity');
-$('#usersBtn').onclick = () => togglePopover('identity');
+$('#identityBtn').onclick = () => { togglePopover('identity'); applyCollapse(); };
+$('#usersBtn').onclick = () => { togglePopover('identity'); applyCollapse(); };
 $('#settingsBtn').onclick = () => togglePopover('settings');
-$('#openIdentity2').onclick = () => togglePopover('identity', true);
+$('#openIdentity2').onclick = () => { togglePopover('identity', true); applyCollapse(); };
 document.querySelectorAll('[data-close]').forEach((b) => { b.onclick = () => togglePopover(b.dataset.close, false); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { togglePopover(null); viewerCard.hidden = true; } });
 document.addEventListener('pointerdown', (e) => {
@@ -430,6 +430,8 @@ function noneTile(key, label) {
 }
 
 // groups: [{ name, badges }] — rendered as one tile grid per group, empty groups skipped
+const keyed = (node, key) => { node.dataset.key = key; return node; };
+
 function renderPicker(container, key, groups, noneLabel) {
   const filled = groups.filter((g) => g.badges.length);
   const none = noneTile(key, noneLabel);
@@ -437,7 +439,7 @@ function renderPicker(container, key, groups, noneLabel) {
   // the "no badge" tile leads the first grid, like on Twitch
   container.replaceChildren(...filled.map((g, i) => el('div', { className: 'badge-group' },
     g.name ? el('div', { className: 'group-name', textContent: g.name }) : null,
-    el('div', { className: 'badge-grid' }, ...(i === 0 ? [none] : []), ...g.badges.map((b) => badgeTile(b, key))))));
+    keyed(el('div', { className: 'badge-grid' }, ...(i === 0 ? [none] : []), ...g.badges.map((b) => badgeTile(b, key))), `${key}:${g.name ?? ''}`))));
 }
 
 const KIND_ORDER = { sub: 0, drop: 1, global: 2 };
@@ -451,7 +453,7 @@ function renderCategories() {
     if (!badges.length) return null;
     return el('section', { className: 'cat-section' },
       el('h3', { textContent: cat.name }),
-      el('div', { className: 'badge-grid' }, ...badges.map((b) => badgeTile(b, slotOf(b)))));
+      keyed(el('div', { className: 'badge-grid' }, ...badges.map((b) => badgeTile(b, slotOf(b)))), `cat:${cat.id}`));
   }).filter(Boolean));
 }
 
@@ -492,6 +494,7 @@ function renderIdentity() {
     { name: 'Общие значки Twitch', badges: twitchGlobal() },
   ], 'Без значка');
   filterGlobal();
+  renderMyCategory();
 
   $('#colorGrid').replaceChildren(...COLORS.map((c) => {
     const b = el('button', { type: 'button', className: 'color-opt', title: c, ariaLabel: `Цвет ${c}`, style: `background:${c}` });
@@ -508,6 +511,28 @@ function filterGlobal() {
   const q = $('#globalSearch').value.trim().toLowerCase();
   for (const btn of $('#globalGrid').querySelectorAll('.badge-opt[data-search]')) btn.hidden = Boolean(q) && !btn.dataset.search.includes(q);
   for (const g of $('#globalGrid').querySelectorAll('.badge-group')) g.hidden = !g.querySelector('.badge-opt:not([hidden])');
+  applyCollapse();
+}
+
+// Long badge groups show their first row; the rest opens with "Показать все" (search results are always expanded).
+const expandedGrids = new Set();
+function applyCollapse() {
+  if ($('#identity').hidden) return; // needs layout to know what fits in a row
+  const searching = Boolean($('#globalSearch').value.trim());
+  for (const grid of document.querySelectorAll('#identity .badge-grid[data-key]')) {
+    const key = grid.dataset.key;
+    grid.nextElementSibling?.classList.contains('more-badges') && grid.nextElementSibling.remove();
+    grid.classList.remove('collapsed');
+    const tiles = [...grid.children].filter((t) => !t.hidden);
+    if (!tiles.length) continue;
+    const overflow = tiles.filter((t) => t.offsetTop > tiles[0].offsetTop).length;
+    if (!overflow || (searching && grid.closest('#globalGrid'))) continue;
+    const open = expandedGrids.has(key);
+    if (!open) grid.classList.add('collapsed');
+    const btn = el('button', { type: 'button', className: 'more-badges', textContent: open ? 'Свернуть' : `Показать все (ещё ${overflow})` });
+    btn.onclick = () => { if (open) expandedGrids.delete(key); else expandedGrids.add(key); applyCollapse(); };
+    grid.after(btn);
+  }
 }
 $('#globalSearch').addEventListener('input', filterGlobal);
 
@@ -803,11 +828,10 @@ function planImport(files) {
   return plan;
 }
 
-async function bulkImport(fileList) {
-  const report = $('#bulkReport');
+async function bulkImport(fileList, report = $('#bulkReport'), say = status, categoryId = targetCategoryId()) {
   const line = (ok, text) => report.append(el('li', { className: ok ? 'ok' : 'err', textContent: (ok ? '✓ ' : '✕ ') + text }));
   report.replaceChildren();
-  if (!targetCategoryId()) { status('Сначала создайте свою категорию', true); return; }
+  if (!categoryId) { say('Сначала создайте свою категорию', true); return; }
   const files = [];
   for (const file of fileList) {
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -817,11 +841,11 @@ async function bulkImport(fileList) {
   }
   for (const f of files.filter((x) => x.error)) line(false, `${f.name}: ${f.error}`);
   const plan = planImport(files.filter((x) => !x.error));
-  if (!plan.length) { status('В выбранных файлах нет PNG', true); return; }
+  if (!plan.length) { say('В выбранных файлах нет PNG', true); return; }
   let added = 0;
-  const own = ownBadges(); // local copy: validates later items against earlier ones without touching `state`
+  const own = state.badges.filter((b) => b.categoryId === categoryId); // local copy: validates later items against earlier ones without touching `state`
   for (const [i, item] of plan.entries()) {
-    status(`Загрузка ${i + 1} из ${plan.length}…`);
+    say(`Загрузка ${i + 1} из ${plan.length}…`);
     let input;
     if (item.kind === 'sub') {
       const fromName = Number((item.name.match(/\d+/) || [])[0]);
@@ -834,17 +858,45 @@ async function bulkImport(fileList) {
     if (check.failed) { line(false, `${label}: ${check.items.filter((x) => x.level === 'err').map((x) => x.text).join('; ')}`); continue; }
     try {
       const images = Object.fromEntries(Object.entries(input.images).map(([k, b]) => [k, dataUrl(b).split(',')[1]]));
-      const badge = await api('/badges', { method: 'POST', body: { ...input, images, categoryId: targetCategoryId() } });
+      const badge = await api('/badges', { method: 'POST', body: { ...input, images, categoryId } });
       own.push(badge);
       added++;
       line(true, label);
     } catch (err) { line(false, `${label}: ${err.message}`); }
   }
   await refresh();
-  status(`Загружено ${added} из ${plan.length}.`, added < plan.length);
+  say(`Загружено ${added} из ${plan.length}.`, added < plan.length);
 }
 
 $('#bulkInput').addEventListener('change', (e) => { bulkImport([...e.target.files]); e.target.value = ''; });
+
+/* ---------- own category inside "Имя в чате" ---------- */
+function renderMyCategory() {
+  const has = Boolean(me.category);
+  $('#myCatCreate').hidden = has;
+  $('#myCatUpload').hidden = !has;
+  if (has) $('#myCatName').textContent = me.category.name;
+  else if (!$('#myCatInput').value) $('#myCatInput').value = profile.nick;
+}
+const idStatus = (text, isErr = false) => { const s = $('#myCatStatus'); s.textContent = text; s.classList.toggle('err', isErr); };
+$('#myCatForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = e.submitter;
+  btn.disabled = true;
+  try {
+    me = await api('/me', { method: 'PUT', body: { name: $('#myCatInput').value } });
+    await refresh();
+    renderMyCategory();
+    idStatus(`Категория «${me.category.name}» создана — загрузите в неё значки.`);
+  } catch (err) { idStatus(err.message, true); } finally { btn.disabled = false; }
+});
+$('#myCatFiles').addEventListener('change', async (e) => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  await bulkImport(files, $('#myCatReport'), idStatus, me.category?.id);
+  applyCollapse();
+});
+$('#myCatManage').onclick = () => { togglePopover(null); $('#openAdmin').click(); };
 $('#bulkMenuInput').addEventListener('change', (e) => {
   const files = [...e.target.files];
   e.target.value = '';
