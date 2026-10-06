@@ -32,9 +32,9 @@ const COLORS = ['#FF0000', '#0000FF', '#008000', '#B22222', '#FF7F50', '#9ACD32'
 
 // Twitch global badge sets grouped the way the identity card offers them.
 const ROLE_SETS = ['broadcaster', 'lead_moderator', 'moderator', 'vip', 'artist-badge', 'partner', 'staff', 'admin', 'global_mod'];
-const CHANNEL_SETS = ['subscriber', 'founder'];
-const EXTRA_SETS = ['sub-gifter', 'sub-gift-leader', 'bits', 'bits-leader', 'predictions', 'hype-train', 'moments', 'clips-leader'];
-const SLOTS = ['role', 'channelBadge', 'extraBadge', 'globalBadge']; // Twitch display order in a chat line
+const CHANNEL_SETS = ['subscriber', 'founder', 'sub-gifter', 'sub-gift-leader', 'bits', 'bits-leader', 'predictions', 'hype-train', 'moments', 'clips-leader'];
+// Twitch shows at most 3 badges: role, one channel badge (sub / bits / gifts / drop), one chosen global badge.
+const SLOTS = ['role', 'channelBadge', 'globalBadge'];
 
 /* ---------- identity for uploads: a random secret kept in this browser (+ optional owner admin key) ---------- */
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -67,7 +67,7 @@ const twitchBadge = (set, v) => ({
 const versionOrder = (a, b) => (Number(a.id) - Number(b.id)) || a.id.localeCompare(b.id, 'en', { numeric: true });
 const twitchSets = (names) => names.flatMap((n) => twitch.find((s) => s.set === n)?.versions.slice().sort(versionOrder).map((v) => twitchBadge(n, v)) ?? []);
 const twitchGlobal = () => {
-  const taken = new Set([...ROLE_SETS, ...CHANNEL_SETS, ...EXTRA_SETS]);
+  const taken = new Set([...ROLE_SETS, ...CHANNEL_SETS]);
   return twitch.filter((s) => !taken.has(s.set)).flatMap((s) => s.versions.slice().sort(versionOrder).map((v) => twitchBadge(s.set, v)));
 };
 
@@ -107,7 +107,7 @@ function describe(b) {
   if (b.kind === 'drop') {
     const n = b.unlock.amount;
     const how = {
-      sub: `${n} ${plural(n, 'подписка', 'подписки', 'подписок')} или подарков`,
+      sub: `${n} ${plural(n, 'подписка', 'подписки', 'подписок')} (вкл. подарочные)`,
       watch: `${n} ч просмотра`,
       top: `топ-${n} дарителей события`,
     }[b.unlock.type];
@@ -142,17 +142,20 @@ function badgeImg(v) {
   img.dataset.title = v.title;
   img.dataset.desc = v.desc || '';
   img.dataset.big = bigSrc(imgs);
-  img.onerror = () => img.remove();
+  // Twitch's CDN lacks a few small sizes: fall back to the large image once
+  img.onerror = () => { if (img.src !== img.dataset.big) { img.removeAttribute('srcset'); img.src = img.dataset.big; } else img.remove(); };
   return img;
 }
 
 /* ---------- state ---------- */
 const profile = Object.assign(
-  { nick: 'Viewer', color: '#FF0000', role: null, channelBadge: null, extraBadge: null, globalBadge: null },
+  { nick: 'Viewer', color: '#FF0000', role: null, channelBadge: null, globalBadge: null },
   store.get('tbc.profile', {}),
 );
 // v1 stored roles as plain names with home-made icons
 if (profile.role && !profile.role.startsWith('tw:')) profile.role = `tw:${profile.role}:1`;
+// v2 had a 4th slot; Twitch only has 3
+if ('extraBadge' in profile) { profile.channelBadge ??= profile.extraBadge; delete profile.extraBadge; }
 let messages = store.get('tbc.messages', []);
 const settings = Object.assign({ timestamps: true }, store.get('tbc.settings', {}));
 const saveProfile = () => store.set('tbc.profile', profile);
@@ -217,7 +220,40 @@ function addMessage(text) {
   scroller.scrollTop = scroller.scrollHeight;
 }
 
+/* ---------- viewer card (click on a nickname) ---------- */
+const viewerCard = $('#viewerCard');
+function openViewerCard(m, anchor) {
+  const color = readable(m.color);
+  $('#vcAvatar').textContent = m.nick.slice(0, 1).toUpperCase();
+  $('#vcAvatar').style.background = m.color;
+  $('#vcName').textContent = m.nick;
+  $('#vcName').style.color = color;
+  $('#vcBadges').replaceChildren(...m.badges.map((b) => {
+    const img = badgeImg(b);
+    img.className = 'vc-badge';
+    img.removeAttribute('width'); img.removeAttribute('height');
+    img.src = bigSrc(b.images);
+    img.removeAttribute('srcset');
+    return img;
+  }));
+  $('#vcBadgeList').replaceChildren(...m.badges.map((b) => el('li', {},
+    el('img', { src: bigSrc(b.images), alt: '', width: 18, height: 18 }),
+    el('span', {}, el('b', { textContent: b.title }), b.desc ? el('small', { textContent: b.desc }) : null))));
+  $('#vcEmpty').hidden = m.badges.length > 0;
+  viewerCard.hidden = false;
+  const chat = $('.chat').getBoundingClientRect();
+  const r = anchor.getBoundingClientRect();
+  viewerCard.style.top = Math.max(50, Math.min(r.bottom + 4 - chat.top, chat.height - viewerCard.offsetHeight - 10)) + 'px';
+}
+$('#vcClose').onclick = () => { viewerCard.hidden = true; };
+
 list.addEventListener('click', (e) => {
+  const name = e.target.closest('.name');
+  if (name) {
+    const m = messages.find((x) => x.id === name.closest('.line').dataset.id);
+    if (m) openViewerCard(m, name);
+    return;
+  }
   const btn = e.target.closest('.mod-btn');
   if (!btn) return;
   const line = btn.closest('.line');
@@ -261,9 +297,10 @@ $('#usersBtn').onclick = () => togglePopover('identity');
 $('#settingsBtn').onclick = () => togglePopover('settings');
 $('#openIdentity2').onclick = () => togglePopover('identity', true);
 document.querySelectorAll('[data-close]').forEach((b) => { b.onclick = () => togglePopover(b.dataset.close, false); });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') togglePopover(null); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { togglePopover(null); viewerCard.hidden = true; } });
 document.addEventListener('pointerdown', (e) => {
   if (!e.target.closest('.popover, #identityBtn, #settingsBtn, #usersBtn')) togglePopover(null);
+  if (!e.target.closest('#viewerCard, .line .name')) viewerCard.hidden = true;
 });
 $('#collapseBtn').onclick = () => $('.chat').classList.toggle('collapsed');
 
@@ -292,6 +329,7 @@ function badgeTile(b, key) {
   const v = badgeView(b);
   const btn = el('button', { type: 'button', className: 'badge-opt', title: v.title, ariaLabel: v.title });
   btn.dataset.id = b.id;
+  btn.dataset.slot = key;
   btn.dataset.search = `${v.title} ${b.set ?? ''}`.toLowerCase();
   btn.setAttribute('aria-pressed', String(profile[key] === b.id));
   const img = el('img', { src: b.images.x2 || bigSrc(b.images), alt: '', loading: 'lazy', width: 28, height: 28 });
@@ -305,6 +343,7 @@ function badgeTile(b, key) {
 function noneTile(key, label) {
   const btn = el('button', { type: 'button', className: 'badge-opt none', title: label, ariaLabel: label });
   btn.dataset.id = '';
+  btn.dataset.slot = key;
   btn.setAttribute('aria-pressed', String(!profile[key]));
   btn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" fill-rule="evenodd" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20ZM4 12a8 8 0 0 1 12.9-6.3L5.7 16.9A8 8 0 0 1 4 12Zm3.1 6.3L18.3 7.1A8 8 0 0 1 7.1 18.3Z" clip-rule="evenodd"/></svg>';
   btn.onclick = () => pick(key, null);
@@ -322,16 +361,25 @@ function renderPicker(container, key, groups, noneLabel) {
     el('div', { className: 'badge-grid' }, ...(i === 0 ? [none] : []), ...g.badges.map((b) => badgeTile(b, key))))));
 }
 
-const uploaded = (kinds) => state.categories.map((cat) => ({
-  name: cat.name,
-  badges: state.badges.filter((b) => b.categoryId === cat.id && kinds.includes(b.kind))
-    .sort((a, b) => (a.kind === b.kind ? (a.months ?? 0) - (b.months ?? 0) : a.kind === 'sub' ? -1 : 1)),
-}));
+const KIND_ORDER = { sub: 0, drop: 1, global: 2 };
+const slotOf = (b) => (b.kind === 'global' ? 'globalBadge' : 'channelBadge');
+
+// Each uploader category is its own section right under the role picker.
+function renderCategories() {
+  $('#categoryGrids').replaceChildren(...state.categories.map((cat) => {
+    const badges = state.badges.filter((b) => b.categoryId === cat.id)
+      .sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || (a.months ?? 0) - (b.months ?? 0));
+    if (!badges.length) return null;
+    return el('section', { className: 'cat-section' },
+      el('h3', { textContent: cat.name }),
+      el('div', { className: 'badge-grid' }, ...badges.map((b) => badgeTile(b, slotOf(b)))));
+  }).filter(Boolean));
+}
 
 function pick(key, value) {
   profile[key] = value;
   saveProfile();
-  for (const btn of document.querySelectorAll(`[data-slot="${key}"] .badge-opt`)) {
+  for (const btn of document.querySelectorAll(`.badge-opt[data-slot="${key}"]`)) {
     btn.setAttribute('aria-pressed', String(btn.dataset.id === (value ?? '')));
   }
   renderPreview();
@@ -354,9 +402,12 @@ function renderIdentity() {
     if (profile[k] && !byId(profile[k]) && (twitch.length || !profile[k].startsWith('tw:'))) { profile[k] = null; saveProfile(); }
   }
   renderPicker($('#roleGrid'), 'role', [{ badges: twitchSets(ROLE_SETS) }], 'Зритель');
-  renderPicker($('#channelGrid'), 'channelBadge', [...uploaded(['sub', 'drop']), { name: 'Twitch (по умолчанию)', badges: twitchSets(CHANNEL_SETS) }], 'Без значка');
-  renderPicker($('#extraGrid'), 'extraBadge', [{ badges: twitchSets(EXTRA_SETS) }], 'Без значка');
-  renderPicker($('#globalGrid'), 'globalBadge', [...uploaded(['global']), { name: 'Twitch', badges: twitchGlobal() }], 'Без значка');
+  renderCategories();
+  renderPicker($('#channelGrid'), 'channelBadge', [
+    { name: 'Подписка', badges: twitchSets(['subscriber', 'founder']) },
+    { name: 'Bits и подарки', badges: twitchSets(CHANNEL_SETS.slice(2)) },
+  ], 'Без значка');
+  renderPicker($('#globalGrid'), 'globalBadge', [{ badges: twitchGlobal() }], 'Без значка');
   filterGlobal();
 
   $('#colorGrid').replaceChildren(...COLORS.map((c) => {
@@ -428,8 +479,19 @@ function renderManager() {
     const mine = cat.id === me.category?.id;
     const canEdit = mine || me.admin;
     const badges = state.badges.filter((b) => b.categoryId === cat.id);
-    const head = el('div', { className: 'cat-head' }, el('b', { textContent: cat.name + (mine ? ' (моя)' : '') }),
-      el('span', { className: 'muted', textContent: `${badges.length} шт.` }));
+    const head = el('div', { className: 'cat-head' });
+    head.dataset.name = cat.name;
+    if (canEdit) {
+      const nameInput = el('input', { className: 'field', value: cat.name, maxLength: 25, minLength: 2, ariaLabel: 'Название категории' });
+      const save = el('button', { className: 'btn', textContent: 'Переименовать' });
+      save.onclick = () => run(save, async () => {
+        await api(`/categories/${cat.id}`, { method: 'PUT', body: { name: nameInput.value } });
+        await refresh();
+        status(`Категория переименована в «${nameInput.value.trim()}».`);
+      });
+      head.append(nameInput, save);
+    } else head.append(el('b', { textContent: cat.name }));
+    head.append(el('span', { className: 'muted', textContent: `${mine ? 'моя · ' : ''}${badges.length} шт.` }));
     if (canEdit) {
       const del = el('button', { className: 'btn danger', textContent: 'Удалить категорию' });
       confirmClick(del, 'Удалить категорию', async () => {

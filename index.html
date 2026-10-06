@@ -35,6 +35,23 @@
       <div class="chat-welcome" id="welcome"></div>
       <div id="messages" role="log" aria-live="polite"></div>
     </div>
+    <!-- viewer card (click on a nickname) -->
+    <section class="viewer-card" id="viewerCard" hidden aria-label="Карточка пользователя">
+      <div class="vc-banner"></div>
+      <button class="icon-btn vc-close" id="vcClose" aria-label="Закрыть"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M13.414 12l5.293-5.293-1.414-1.414L12 10.586 6.707 5.293 5.293 6.707 10.586 12l-5.293 5.293 1.414 1.414L12 13.414l5.293 5.293 1.414-1.414L13.414 12Z"/></svg></button>
+      <div class="vc-head">
+        <div class="vc-avatar" id="vcAvatar"></div>
+        <div>
+          <div class="vc-name" id="vcName"></div>
+          <div class="vc-badges" id="vcBadges"></div>
+        </div>
+      </div>
+      <div class="vc-body">
+        <h3>Значки</h3>
+        <ul class="vc-list" id="vcBadgeList"></ul>
+        <p class="hint" id="vcEmpty" hidden>У пользователя нет значков.</p>
+      </div>
+    </section>
     <button class="more-msgs" id="moreBtn" hidden>Чат приостановлен — прокрутите вниз</button>
 
     <div class="chat-input-wrap">
@@ -54,19 +71,19 @@
           <input class="field" id="nickInput" maxlength="25" autocomplete="off" spellcheck="false">
 
           <h3>Роль в канале</h3>
-          <div class="picker" id="roleGrid" data-slot="role"></div>
+          <div class="picker" id="roleGrid"></div>
+
+          <!-- uploaded categories: one section each -->
+          <div id="categoryGrids"></div>
 
           <h3>Значок канала</h3>
-          <p class="hint">Отображается только на этом канале: подписка и Creator Badge Drops.</p>
-          <div class="picker" id="channelGrid" data-slot="channelBadge"></div>
-
-          <h3>Bits, подарки и прогнозы</h3>
-          <div class="picker" id="extraGrid" data-slot="extraBadge"></div>
+          <p class="hint">Отображается только на этом канале. Можно выбрать один: подписка, Bits, подарки или Creator Badge Drop.</p>
+          <div class="picker" id="channelGrid"></div>
 
           <h3>Общий значок</h3>
           <p class="hint">Этот значок отображается на всех каналах и в личных сообщениях.</p>
           <input class="field search" id="globalSearch" type="search" placeholder="Поиск значка" autocomplete="off">
-          <div class="picker" id="globalGrid" data-slot="globalBadge"></div>
+          <div class="picker" id="globalGrid"></div>
 
           <h3>Глобальный цвет имени</h3>
           <p class="hint">Выберите любой цвет! Обновление цвета в комнате чата может занимать несколько минут.</p>

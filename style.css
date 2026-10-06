@@ -253,3 +253,30 @@ svg { display: block; }
 .cat-head .muted { margin: 0; }
 .cat-head .btn { margin-left: auto; }
 .send-btn { border-radius: 9000px; height: 32px; padding: 0 12px; }
+
+/* uploaded categories in the identity card */
+.cat-section h3 { margin-top: 14px; }
+
+/* viewer card */
+.viewer-card {
+  position: absolute; left: 10px; right: 10px; z-index: 20; overflow: hidden;
+  background: var(--bg-chat); border: 1px solid var(--border); border-radius: 6px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, .5), 0 0 4px rgba(0, 0, 0, .4);
+}
+.vc-banner { height: 60px; background: linear-gradient(135deg, #451093, #9147ff); }
+.vc-close { position: absolute; top: 6px; right: 6px; background: rgba(0, 0, 0, .4); }
+.vc-head { display: flex; gap: 10px; align-items: flex-start; padding: 0 12px; margin-top: -28px; }
+.vc-head > div:last-child { padding-top: 32px; min-width: 0; }
+.vc-avatar {
+  width: 56px; height: 56px; flex: none; border-radius: 50%; border: 3px solid var(--bg-chat);
+  display: grid; place-items: center; font-size: 22px; font-weight: 700; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .5);
+}
+.vc-name { font-size: 16px; font-weight: 700; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vc-badges { display: flex; gap: 4px; margin-top: 4px; min-height: 18px; }
+.vc-badge { width: 18px; height: 18px; }
+.vc-body { padding: 4px 12px 12px; }
+.vc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.vc-list li { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 18px; }
+.vc-list img { flex: none; margin-top: 1px; }
+.vc-list small { display: block; color: var(--text-muted); }
+.cat-head .field { flex: 1; min-width: 0; }

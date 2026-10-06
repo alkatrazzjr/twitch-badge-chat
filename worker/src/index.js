@@ -138,6 +138,17 @@ const routes = {
     return { ok: true };
   },
 
+  async 'PUT /categories/:id'(req, env, who, base, id) {
+    if (!(await canManage(env, who, id))) throw new HttpError(403, 'Изменять можно только свою категорию');
+    const name = String((await readJson(req)).name || '').trim();
+    if (!CATEGORY_NAME.test(name)) throw new HttpError(400, 'Название категории: 2–25 символов');
+    const taken = await env.DB.prepare('SELECT id FROM categories WHERE name = ?').bind(name).first();
+    if (taken && taken.id !== id) throw new HttpError(409, 'Такая категория уже есть');
+    const { meta } = await env.DB.prepare('UPDATE categories SET name = ? WHERE id = ?').bind(name, id).run();
+    if (!meta.changes) throw new HttpError(404, 'Категория не найдена');
+    return { ok: true };
+  },
+
   async 'DELETE /categories/:id'(req, env, who, base, id) {
     if (!(await canManage(env, who, id))) throw new HttpError(403, 'Удалять можно только свою категорию');
     await env.DB.batch([
