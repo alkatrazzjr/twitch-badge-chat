@@ -10,7 +10,8 @@ const CONFUSABLE = { а: 'a', в: 'b', е: 'e', ё: 'e', к: 'k', м: 'm', н: '
 const skeleton = (nick) => [...nick.toLowerCase()].map((ch) => CONFUSABLE[ch] ?? ch).join('')
   .replace(/0/g, 'o').replace(/[1l]/g, 'i').replace(/_/g, '');
 const RESERVED = ['alkatrazzjr', 'admin', 'moderator', 'twitch'].map(skeleton);
-const PROFILE_LIMIT = { windowMs: 3600_000, max: 10 };   // nick/color changes per IP per hour
+// new nicks per IP (people may share an IP) and nick/color changes per browser key, per hour
+const PROFILE_LIMIT = { windowMs: 3600_000, newPerIp: 30, changesPerKey: 20 };
 const COLOR = /^#[0-9A-Fa-f]{6}$/;
 const RATE = { minGapMs: 300, windowMs: 30_000, maxInWindow: 20 }; // per IP, so new browser keys don't reset it
 
@@ -94,16 +95,17 @@ export class ChatRoom extends DurableObject {
     if (owner && owner.key_hash !== att.keyHash) return this.send(ws, { type: 'profile', error: `Ник «${nick}» уже занят` });
     const current = this.user(att.keyHash);
     if (current?.nick === nick && current.color === color.toUpperCase()) return this.send(ws, { type: 'profile', me: current });
-    if (!att.admin && this.limited(att.ipHash, 'profile', PROFILE_LIMIT.windowMs, PROFILE_LIMIT.max)) {
-      return this.send(ws, { type: 'profile', error: 'Слишком много смен ника, попробуйте позже' });
-    }
+    const limitedNow = current
+      ? this.limited(att.keyHash, 'profile-change', PROFILE_LIMIT.windowMs, PROFILE_LIMIT.changesPerKey)
+      : this.limited(att.ipHash, 'profile-new', PROFILE_LIMIT.windowMs, PROFILE_LIMIT.newPerIp);
+    if (!att.admin && limitedNow) return this.send(ws, { type: 'profile', error: 'Слишком много смен ника, попробуйте позже' });
     this.sql.exec(`INSERT INTO users (key_hash, nick, color, skeleton) VALUES (?, ?, ?, ?)
       ON CONFLICT(key_hash) DO UPDATE SET nick = excluded.nick, color = excluded.color, skeleton = excluded.skeleton`,
     att.keyHash, nick, color.toUpperCase(), skel);
     this.send(ws, { type: 'profile', me: this.user(att.keyHash) });
   }
 
-  // Records the event unless the IP already hit `max` events of this kind within `windowMs` (or posts too fast).
+  // Records the event unless `who` (IP or browser-key hash) already hit `max` events of this kind within `windowMs`.
   limited(ipHash, kind, windowMs, max, minGapMs = 0) {
     const now = Date.now();
     this.sql.exec('DELETE FROM events WHERE at < ?', now - 3600_000);
