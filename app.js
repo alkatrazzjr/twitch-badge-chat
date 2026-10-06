@@ -186,7 +186,7 @@ function lineEl(m) {
   line.append(
     el('span', { className: 'name', textContent: m.nick, style: `color:${readable(m.color)}` }),
     el('span', { textContent: ': ' }),
-    el('span', { className: 'msg', textContent: m.text }),
+    el('span', { className: 'msg' }, ...renderText(m.text)),
   );
   return line;
 }
@@ -376,7 +376,7 @@ $('#openIdentity2').onclick = () => { togglePopover('identity', true); applyColl
 document.querySelectorAll('[data-close]').forEach((b) => { b.onclick = () => togglePopover(b.dataset.close, false); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { togglePopover(null); viewerCard.hidden = true; } });
 document.addEventListener('pointerdown', (e) => {
-  if (!e.target.closest('.popover, #identityBtn, #settingsBtn, #usersBtn')) togglePopover(null);
+  if (!e.target.closest('.popover, #identityBtn, #settingsBtn, #usersBtn, #emoteBtn')) togglePopover(null);
 });
 $('#collapseBtn').onclick = () => $('.chat').classList.toggle('collapsed');
 
@@ -821,6 +821,127 @@ async function bulkImport(fileList, line, say, categoryId) {
   say(`Загружено ${added} из ${plan.length}.`, added < plan.length);
 }
 
+/* ---------- emotes: Twitch globals + 7TV / BTTV / FFZ (global and channel), like the browser extensions ---------- */
+const CHANNEL_ID = '415309986'; // twitch user id of the channel
+// Classic Twitch global emotes (Helix needs an app token; these ids are stable and verified to load).
+const TWITCH_EMOTES = {
+  Kappa: 25, Keepo: 1902, LUL: 425618, '4Head': 354, Kreygasm: 41, ResidentSleeper: 245, WutFace: 28087, NotLikeThis: 58765,
+  SeemsGood: 64138, BabyRage: 22639, DansGame: 33, FailFish: 360, HeyGuys: 30259, Jebaited: 114836, KappaPride: 55338,
+  MrDestructoid: 28, PJSalt: 36, SwiftRage: 34, TriHard: 120232, VoHiYo: 81274, CoolStoryBob: 123171, cmonBruh: 84608,
+  BloodTrail: 69, OpieOP: 100590, SMOrc: 52, KomodoHype: 81273, PogChamp: 305954156, EleGiggle: 4339, CoolCat: 58127,
+  DoritosChip: 102242, GivePLZ: 112291, TakeNRG: 112292, FrankerZ: 65, ANELE: 3792, BrokeBack: 4057, CorgiDerp: 49106,
+  DarkMode: 461298, HSWP: 446979, KappaHD: 2867, MingLee: 68856, Mau5: 30134, Squid1: 191762, TwitchUnity: 196892,
+  VirtualHug: 301696001, HotPokket: 357, Kappu: 160397, PopCorn: 724216, '<3': 9, ':)': 1, ':(': 2, ':D': 3, ';)': 11,
+  ':P': 12, ':O': 8, 'B)': 7, 'R)': 14, ':/': 10, '>(': 4, 'O_o': 6, ':Z': 5, ';P': 13,
+};
+const PROVIDERS = { twitch: 'Twitch', '7tv': '7TV', bttv: 'BTTV', ffz: 'FFZ' };
+let emotes = new Map(); // code -> { code, provider, scope, x1, x2, x4, zw }
+
+const getJson = async (url) => { const r = await fetch(url); if (!r.ok) throw new Error(String(r.status)); return r.json(); };
+const stvList = (set, scope) => (set?.emotes ?? []).map((e) => {
+  const host = `https:${e.data.host.url}`;
+  return { code: e.name, provider: '7tv', scope, x1: `${host}/1x.webp`, x2: `${host}/2x.webp`, x4: `${host}/4x.webp`, zw: Boolean((e.flags ?? 0) & 1) };
+});
+const bttvList = (list, scope) => list.map((e) => ({
+  code: e.code, provider: 'bttv', scope, x1: `https://cdn.betterttv.net/emote/${e.id}/1x`, x2: `https://cdn.betterttv.net/emote/${e.id}/2x`, x4: `https://cdn.betterttv.net/emote/${e.id}/3x`,
+  zw: ['cvHazmat', 'cvMask', 'IceCold', 'SoSnowy', 'TopHat', 'SantaHat', 'ReinDeer', 'CandyCane'].includes(e.code),
+}));
+const ffzList = (sets, scope) => Object.values(sets ?? {}).flatMap((s) => s.emoticons.map((e) => ({
+  code: e.name, provider: 'ffz', scope, x1: e.urls['1'], x2: e.urls['2'] || e.urls['1'], x4: e.urls['4'] || e.urls['2'] || e.urls['1'], zw: false,
+})));
+
+async function loadEmotes() {
+  const cached = store.get('tbc.emotes', null);
+  if (cached && Date.now() - cached.at < 6 * 3600_000) { setEmotes(cached.list); return; }
+  const [stvG, stvC, bttvG, bttvC, ffzG, ffzC] = await Promise.allSettled([
+    getJson('https://7tv.io/v3/emote-sets/global'),
+    getJson(`https://7tv.io/v3/users/twitch/${CHANNEL_ID}`),
+    getJson('https://api.betterttv.net/3/cached/emotes/global'),
+    getJson(`https://api.betterttv.net/3/cached/users/twitch/${CHANNEL_ID}`),
+    getJson('https://api.frankerfacez.com/v1/set/global'),
+    getJson(`https://api.frankerfacez.com/v1/room/id/${CHANNEL_ID}`),
+  ]);
+  const ok = (r) => (r.status === 'fulfilled' ? r.value : null);
+  const twitchList = Object.entries(TWITCH_EMOTES).map(([code, id]) => {
+    const u = (n) => `https://static-cdn.jtvnw.net/emoticons/v2/${id}/default/dark/${n}`;
+    return { code, provider: 'twitch', scope: 'global', x1: u('1.0'), x2: u('2.0'), x4: u('3.0'), zw: false };
+  });
+  const ffzGlobal = ok(ffzG);
+  // first one wins on name clashes, in the order chat extensions use: Twitch, channel emotes, then globals
+  const list = [
+    ...twitchList,
+    ...stvList(ok(stvC)?.emote_set, 'channel'),
+    ...bttvList([...(ok(bttvC)?.channelEmotes ?? []), ...(ok(bttvC)?.sharedEmotes ?? [])], 'channel'),
+    ...ffzList(ok(ffzC)?.sets, 'channel'),
+    ...stvList(ok(stvG), 'global'),
+    ...bttvList(ok(bttvG) ?? [], 'global'),
+    ...ffzList(ffzGlobal && Object.fromEntries(ffzGlobal.default_sets.map((id) => [id, ffzGlobal.sets[id]])), 'global'),
+  ];
+  store.set('tbc.emotes', { at: Date.now(), list });
+  setEmotes(list);
+}
+
+function setEmotes(list) {
+  emotes = new Map();
+  for (const e of list) if (!emotes.has(e.code)) emotes.set(e.code, e);
+  renderMessages(); // re-render existing lines with emotes
+  renderEmotePicker();
+}
+
+const emoteImg = (e) => {
+  const img = el('img', { className: 'emote', src: e.x1, alt: e.code, loading: 'lazy' });
+  img.srcset = `${e.x1} 1x, ${e.x2} 2x, ${e.x4} 4x`;
+  Object.assign(img.dataset, { title: e.code, desc: `${PROVIDERS[e.provider]} · ${e.scope === 'channel' ? 'смайлик канала' : 'глобальный'}`, big: e.x4 });
+  return img;
+};
+
+// Message text -> text nodes + emote images; zero-width emotes (7TV) stack on top of the previous emote.
+function renderText(text) {
+  const out = [];
+  for (const part of text.split(/(\s+)/)) {
+    const e = part && emotes.get(part);
+    if (!e) { out.push(document.createTextNode(part)); continue; }
+    const prev = out.findLast((n) => n.nodeType === 1 || n.textContent.trim());
+    if (e.zw && prev?.classList?.contains('emote-stack')) { prev.append(emoteImg(e)); continue; }
+    out.push(el('span', { className: 'emote-stack' }, emoteImg(e)));
+  }
+  return out;
+}
+
+/* emote picker */
+let emoteTab = 'all';
+function renderEmotePicker() {
+  const q = $('#emoteSearch').value.trim().toLowerCase();
+  const list = [...emotes.values()].filter((e) => (emoteTab === 'all' || e.provider === emoteTab) && (!q || e.code.toLowerCase().includes(q)));
+  const groups = [['channel', 'Смайлики канала'], ['global', 'Глобальные']].map(([scope, title]) => [title, list.filter((e) => e.scope === scope)]);
+  $('#emoteGrid').replaceChildren(...groups.filter(([, l]) => l.length).map(([title, l]) => el('div', { className: 'emote-group' },
+    el('div', { className: 'group-name', textContent: `${title} · ${l.length}` }),
+    el('div', { className: 'emote-grid' }, ...l.map((e) => {
+      const b = el('button', { type: 'button', className: 'emote-opt', title: e.code, ariaLabel: e.code }, emoteImg(e));
+      b.onclick = () => insertEmote(e.code);
+      return b;
+    })))));
+  if (!list.length) $('#emoteGrid').append(el('p', { className: 'empty', textContent: emotes.size ? 'Ничего не найдено' : 'Загрузка смайликов…' }));
+}
+function insertEmote(code) {
+  const start = input.selectionStart ?? input.value.length, end = input.selectionEnd ?? start;
+  const before = input.value.slice(0, start), after = input.value.slice(end);
+  const ins = `${before && !/\s$/.test(before) ? ' ' : ''}${code} `;
+  input.value = before + ins + after;
+  input.focus();
+  input.selectionStart = input.selectionEnd = before.length + ins.length;
+  syncInput();
+}
+$('#emoteBtn').onclick = () => { togglePopover('emotes'); if (!$('#emotes').hidden) $('#emoteSearch').focus(); };
+$('#emoteSearch').addEventListener('input', renderEmotePicker);
+document.querySelectorAll('.emote-tab').forEach((t) => {
+  t.onclick = () => {
+    emoteTab = t.dataset.tab;
+    document.querySelectorAll('.emote-tab').forEach((x) => x.setAttribute('aria-selected', String(x === t)));
+    renderEmotePicker();
+  };
+});
+
 /* ---------- boot ---------- */
 document.title = `${CHANNEL} — Чат трансляции`;
 $('#channelTitle').textContent = CHANNEL;
@@ -832,6 +953,7 @@ renderMessages();
 syncInput();
 refresh();
 loadTwitch();
+loadEmotes();
 connect();
 addEventListener('focus', refresh);
 setInterval(() => { if (!document.hidden) refresh(); }, 60000);

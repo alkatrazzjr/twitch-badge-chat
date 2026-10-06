@@ -113,7 +113,8 @@ svg { display: block; }
 }
 .input-badge:hover { background: var(--bg-hover); }
 .input-badge .badge { margin: 0; }
-.emote-btn { width: 30px; height: 30px; display: grid; place-items: center; flex: none; color: var(--text); }
+.emote-btn { width: 30px; height: 30px; display: grid; place-items: center; flex: none; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--text); cursor: pointer; }
+.emote-btn:hover { background: var(--bg-hover); }
 
 .chat-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 10px; }
 .mod-tools { display: flex; gap: 4px; }
@@ -314,3 +315,20 @@ svg { display: block; }
 .tile-wrap:hover .tile-del, .tile-del:focus-visible, .tile-del.armed { opacity: 1; }
 .tile-del svg { width: 12px; height: 12px; }
 .tile-del.armed { background: var(--danger); color: #fff; }
+
+/* emotes in chat: 28px tall like Twitch, zero-width ones stacked over the previous emote */
+.emote-stack { display: inline-grid; vertical-align: middle; margin: -5px 0; }
+.emote-stack > .emote { grid-area: 1 / 1; place-self: center; }
+.emote { height: 28px; width: auto; max-width: 112px; vertical-align: middle; }
+/* emote picker */
+.emotes { max-height: min(520px, calc(100vh - 120px)); }
+.emote-tools { padding: 0 10px 8px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--border); }
+.emote-tabs { display: flex; gap: 4px; }
+.emote-tab { flex: 1; height: 28px; border: 0; border-radius: 4px; background: none; color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer; }
+.emote-tab:hover { background: var(--bg-hover); color: var(--text); }
+.emote-tab[aria-selected="true"] { background: var(--bg-button); color: var(--text); }
+.emote-group { margin-top: 10px; }
+.emote-grid { display: flex; flex-wrap: wrap; gap: 2px; }
+.emote-opt { width: 40px; height: 40px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: none; cursor: pointer; }
+.emote-opt:hover { background: var(--bg-hover); }
+.emote-opt .emote { max-width: 36px; max-height: 32px; }
