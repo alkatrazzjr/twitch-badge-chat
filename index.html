@@ -36,22 +36,19 @@
       <div class="chat-welcome" id="welcome"></div>
       <div id="messages" role="log" aria-live="polite"></div>
     </div>
-    <!-- viewer card (click on a nickname) -->
+    <!-- viewer card (click on a nickname); dragged by its header like on Twitch -->
     <section class="viewer-card" id="viewerCard" hidden aria-label="Карточка пользователя">
-      <div class="vc-banner"></div>
-      <button class="icon-btn vc-close" id="vcClose" aria-label="Закрыть"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M13.414 12l5.293-5.293-1.414-1.414L12 10.586 6.707 5.293 5.293 6.707 10.586 12l-5.293 5.293 1.414 1.414L12 13.414l5.293 5.293 1.414-1.414L13.414 12Z"/></svg></button>
-      <div class="vc-head">
-        <div class="vc-avatar" id="vcAvatar"></div>
-        <div>
-          <div class="vc-name" id="vcName"></div>
-          <div class="vc-badges" id="vcBadges"></div>
-        </div>
-      </div>
+      <header class="vc-header" id="vcDrag">
+        <div class="vc-avatar" id="vcAvatar" aria-hidden="true"></div>
+        <div class="vc-name" id="vcName"></div>
+        <button class="icon-btn vc-close" id="vcClose" aria-label="Закрыть"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M13.414 12l5.293-5.293-1.414-1.414L12 10.586 6.707 5.293 5.293 6.707 10.586 12l-5.293 5.293 1.414 1.414L12 13.414l5.293 5.293 1.414-1.414L13.414 12Z"/></svg></button>
+      </header>
       <div class="vc-body">
         <h3>Значки</h3>
-        <ul class="vc-list" id="vcBadgeList"></ul>
+        <div class="vc-badges" id="vcBadges"></div>
         <p class="hint" id="vcEmpty" hidden>У пользователя нет значков.</p>
       </div>
+      <footer class="vc-footer" id="vcFooter"></footer>
     </section>
     <button class="more-msgs" id="moreBtn" hidden>Чат приостановлен — прокрутите вниз</button>
 

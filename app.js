@@ -43,6 +43,9 @@ if (!browserKey) { browserKey = b64url(crypto.getRandomValues(new Uint8Array(32)
 const adminFromUrl = new URLSearchParams(location.hash.slice(1)).get('admin');
 if (adminFromUrl) { store.set('tbc.adminKey', adminFromUrl); history.replaceState(null, '', location.pathname + location.search); }
 const adminKey = store.get('tbc.adminKey', null);
+addEventListener('hashchange', () => {
+  if (new URLSearchParams(location.hash.slice(1)).get('admin')) location.reload();
+});
 
 async function api(path, { method = 'GET', body } = {}) {
   const headers = { 'X-Key': browserKey };
@@ -259,28 +262,55 @@ function applyServerProfile(me) {
 /* ---------- viewer card (click on a nickname) ---------- */
 const viewerCard = $('#viewerCard');
 function openViewerCard(m, anchor) {
-  const color = readable(m.color);
+  // Twitch lists every badge the user has; the closest we know is every badge they used in visible messages
+  const seen = new Map();
+  for (const x of messages) {
+    if (x.nick !== m.nick) continue;
+    for (const b of x.badges) seen.set(bigSrc(b.images), b);
+  }
   $('#vcAvatar').textContent = m.nick.slice(0, 1).toUpperCase();
   $('#vcAvatar').style.background = m.color;
+  viewerCard.style.setProperty('--vc-banner', m.color);
   $('#vcName').textContent = m.nick;
-  $('#vcName').style.color = color;
-  $('#vcBadges').replaceChildren(...m.badges.map((b) => {
-    const img = badgeImg(b);
-    img.className = 'vc-badge';
-    img.removeAttribute('width'); img.removeAttribute('height');
-    img.src = bigSrc(b.images);
-    img.removeAttribute('srcset');
-    return img;
+  $('#vcBadges').replaceChildren(...[...seen.values()].map((b) => {
+    const img = el('img', { src: bigSrc(b.images), alt: b.title });
+    Object.assign(img.dataset, { title: b.title, desc: b.desc || '', big: bigSrc(b.images) });
+    return el('div', { className: 'vc-tile' }, img);
   }));
-  $('#vcBadgeList').replaceChildren(...m.badges.map((b) => el('li', {},
-    el('img', { src: bigSrc(b.images), alt: '', width: 18, height: 18 }),
-    el('span', {}, el('b', { textContent: b.title }), b.desc ? el('small', { textContent: b.desc }) : null))));
-  $('#vcEmpty').hidden = m.badges.length > 0;
+  $('#vcEmpty').hidden = seen.size > 0;
+  const count = messages.filter((x) => x.nick === m.nick).length;
+  $('#vcFooter').textContent = `Сообщений в чате: ${count} · последнее в ${fmtTime(Math.max(...messages.filter((x) => x.nick === m.nick).map((x) => x.t)))}`;
+  const wasHidden = viewerCard.hidden;
   viewerCard.hidden = false;
-  const chat = $('.chat').getBoundingClientRect();
-  const r = anchor.getBoundingClientRect();
-  viewerCard.style.top = Math.max(50, Math.min(r.bottom + 4 - chat.top, chat.height - viewerCard.offsetHeight - 10)) + 'px';
+  if (wasHidden) { // a moved card stays where the user dragged it, like on Twitch
+    const chat = $('.chat').getBoundingClientRect();
+    const r = anchor.getBoundingClientRect();
+    placeCard(chat.left + (chat.width - viewerCard.offsetWidth) / 2, r.bottom + 4);
+  }
 }
+
+function placeCard(x, y) {
+  const maxX = innerWidth - viewerCard.offsetWidth - 4, maxY = innerHeight - viewerCard.offsetHeight - 4;
+  viewerCard.style.left = Math.max(4, Math.min(x, maxX)) + 'px';
+  viewerCard.style.top = Math.max(4, Math.min(y, maxY)) + 'px';
+}
+
+$('#vcDrag').addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || e.target.closest('button')) return;
+  const start = viewerCard.getBoundingClientRect();
+  const dx = e.clientX - start.left, dy = e.clientY - start.top;
+  viewerCard.classList.add('dragging');
+  $('#vcDrag').setPointerCapture(e.pointerId);
+  const move = (ev) => placeCard(ev.clientX - dx, ev.clientY - dy);
+  const stop = () => {
+    viewerCard.classList.remove('dragging');
+    $('#vcDrag').removeEventListener('pointermove', move);
+  };
+  $('#vcDrag').addEventListener('pointermove', move);
+  $('#vcDrag').addEventListener('pointerup', stop, { once: true });
+  $('#vcDrag').addEventListener('pointercancel', stop, { once: true });
+});
+addEventListener('resize', () => { if (!viewerCard.hidden) placeCard(viewerCard.offsetLeft, viewerCard.offsetTop); });
 $('#vcClose').onclick = () => { viewerCard.hidden = true; };
 
 list.addEventListener('click', (e) => {
@@ -337,7 +367,6 @@ document.querySelectorAll('[data-close]').forEach((b) => { b.onclick = () => tog
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { togglePopover(null); viewerCard.hidden = true; } });
 document.addEventListener('pointerdown', (e) => {
   if (!e.target.closest('.popover, #identityBtn, #settingsBtn, #usersBtn')) togglePopover(null);
-  if (!e.target.closest('#viewerCard, .line .name')) viewerCard.hidden = true;
 });
 $('#collapseBtn').onclick = () => $('.chat').classList.toggle('collapsed');
 
