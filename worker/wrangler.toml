@@ -1,0 +1,13 @@
+name = "twitch-badge-chat-api"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+ALLOWED_ORIGINS = "https://alkatrazzjr.github.io,http://localhost:8765"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "twitch-badge-chat"
+database_id = "eba15e77-958c-4a70-ba60-824a53fbc4c0"
+
+# Secret (not in git): ADMIN_KEY — `wrangler secret put ADMIN_KEY`

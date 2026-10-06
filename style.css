@@ -174,7 +174,6 @@ a { color: #bf94ff; }
 .row > * { flex: 1; }
 .row.between { justify-content: space-between; align-items: center; }
 .row.between > * { flex: none; }
-.repo-fields { display: flex; gap: 8px; margin-bottom: 8px; }
 .tabs { display: flex; gap: 4px; margin: 14px 0 10px; border-bottom: 1px solid var(--border); }
 .tab { background: none; border: 0; padding: 8px 10px; font-weight: 600; color: var(--text-muted); border-bottom: 2px solid transparent; }
 .tab.active { color: #bf94ff; border-color: var(--purple); }
@@ -215,3 +214,16 @@ a { color: #bf94ff; }
 
 .send-btn { border-radius: 9000px; height: 32px; padding: 0 12px; }
 .chat-input textarea { font-size: 14px; line-height: 21px; }
+
+.api-error { margin: 0; padding: 6px 12px; background: #eb040033; color: #ffb3b2; font-size: 12px; }
+.admin-note { margin: 0 0 8px; padding: 6px 10px; border-radius: 4px; background: #9147ff33; color: #d4bcff; }
+.key-box { margin-top: 8px; }
+.key-box summary { cursor: pointer; color: #bf94ff; }
+.key-box .row { margin-top: 6px; }
+.badge-group + .badge-group, .badge-grid + .badge-group { margin-top: 8px; }
+.group-name { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; }
+.cat { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.cat-head { display: flex; align-items: center; gap: 8px; }
+.cat-head .muted { margin: 0; }
+.cat-head .btn { margin-left: auto; }
+#channelGrid, #globalGrid { flex-direction: column; align-items: flex-start; gap: 8px; }

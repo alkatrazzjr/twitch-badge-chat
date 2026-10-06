@@ -30,6 +30,7 @@
       </button>
     </header>
 
+    <p class="api-error" id="apiError" hidden></p>
     <div class="chat-scroll" id="chatScroll">
       <div class="chat-welcome" id="welcome"></div>
       <div id="messages" role="log" aria-live="polite"></div>
@@ -81,7 +82,7 @@
         <div class="pop-body">
           <label class="toggle-row"><span>Показывать метки времени</span><input type="checkbox" id="tsToggle"></label>
           <button class="menu-item" id="openIdentity2">Имя в чате</button>
-          <button class="menu-item" id="openAdmin">Управление значками</button>
+          <button class="menu-item" id="openAdmin">Значки: загрузить / удалить</button>
           <button class="menu-item danger" id="clearChat">Очистить чат</button>
         </div>
       </section>
@@ -104,34 +105,34 @@
   </aside>
 </div>
 
-<!-- Badge management (owner only: writes go through the GitHub API with the owner's token) -->
+<!-- Badge manager: anyone can upload into their own category; rights = secret key of this browser, owner key = everything -->
 <dialog class="admin" id="admin">
   <div class="pop-head">
-    <span>Управление значками</span>
+    <span>Значки</span>
     <button class="icon-btn" data-close-dialog aria-label="Закрыть">✕</button>
   </div>
   <div class="admin-body">
-    <div id="authBox">
-      <p>Добавлять и удалять значки может только владелец репозитория. Изменения сохраняются коммитом в репозиторий
-        <b id="repoLabel"></b> и через ~1 минуту видны всем по ссылке.</p>
-      <p class="muted">Нужен <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a>:
-        доступ только к этому репозиторию, право <b>Contents: Read and write</b>. Токен хранится только в этом браузере.</p>
-      <div class="repo-fields" id="repoFields" hidden>
-        <input class="field" id="repoOwner" placeholder="владелец (github login)">
-        <input class="field" id="repoName" placeholder="репозиторий">
-      </div>
-      <form id="authForm" class="row">
-        <input class="field" id="tokenInput" type="password" placeholder="github_pat_…" autocomplete="off" required>
-        <button class="btn primary">Войти</button>
+    <p class="admin-note" id="adminBadge" hidden>Режим владельца: можно удалять любые значки и категории.</p>
+    <section>
+      <h3>Моя категория</h3>
+      <p class="muted" id="noCategory">Создайте категорию — в ней будут ваши значки. Удалять их сможете только вы (с этого браузера).</p>
+      <p class="muted" id="hasCategory" hidden>Ваша категория: <b id="myCategoryName"></b>. Права привязаны к этому браузеру.</p>
+      <form id="categoryForm" class="row">
+        <input class="field" id="categoryInput" maxlength="25" minlength="2" required placeholder="Название (ник)">
+        <button class="btn primary">Сохранить</button>
       </form>
-    </div>
-
-    <div id="ownerBox" hidden>
-      <div class="row between">
-        <span class="muted">Вошли как <b id="ownerLogin"></b></span>
-        <button class="btn" id="logoutBtn">Выйти</button>
-      </div>
-
+      <details class="key-box">
+        <summary>Перенести права на другое устройство</summary>
+        <p class="muted">Скопируйте ключ здесь и вставьте его в другом браузере. Никому его не давайте.</p>
+        <div class="row">
+          <button type="button" class="btn" id="copyKey">Скопировать мой ключ</button>
+        </div>
+        <form id="keyForm" class="row">
+          <input class="field" id="keyInput" type="password" placeholder="Вставить ключ" autocomplete="off">
+          <button class="btn">Применить</button>
+        </form>
+      </details>
+    </section>
       <div class="tabs" role="tablist">
         <button class="tab active" data-tab="drop" role="tab">Creator Badge Drop</button>
         <button class="tab" data-tab="sub" role="tab">Значок подписчика</button>
@@ -190,14 +191,13 @@
         <button class="btn primary">Загрузить значок</button>
       </form>
 
-      <h3>Загруженные значки</h3>
+      <h3>Все значки</h3>
       <div id="badgeList" class="badge-list"></div>
-    </div>
     <p class="status" id="adminStatus" aria-live="polite"></p>
   </div>
 </dialog>
 
 <div class="tooltip" id="tooltip" hidden></div>
-<script src="app.js"></script>
+<script type="module" src="app.js"></script>
 </body>
 </html>
