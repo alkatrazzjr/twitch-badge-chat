@@ -1,19 +1,18 @@
 import { validateBadge, deleteBlocker, IMAGE_KEYS } from '../../rules.js';
+import { sha256, userByKey } from './users.js';
 
 export { ChatRoom } from './chat.js';
 
 const MAX_BODY = 400 * 1024;
 const MAX_BADGES_PER_CATEGORY = 60;
-const MAX_CATEGORIES_PER_IP = 5;
-const MAX_UPLOADS_PER_IP_PER_HOUR = 60;
-const CATEGORY_NAME = /^[^\p{C}]{2,25}$/u;
+const MAX_CATEGORIES_PER_USER = 20;
+const LIMITS = { uploadsPerHour: 120, categoriesPerHour: 20 }; // per IP
+const CATEGORY_NAME = /^[^\p{C}]{1,25}$/u;
 
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
-const sha256 = async (text) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))]
-  .map((b) => b.toString(16).padStart(2, '0')).join('');
 const newId = () => crypto.randomUUID().replaceAll('-', '').slice(0, 16);
 const b64ToBytes = (s) => Uint8Array.from(atob(s), (ch) => ch.charCodeAt(0));
 
@@ -35,11 +34,9 @@ async function identify(req, env) {
   // compare digests so the check does not leak the admin key through timing
   const admin = Boolean(adminKey && env.ADMIN_KEY) && (await sha256(adminKey)) === (await sha256(env.ADMIN_KEY));
   const keyHash = /^[A-Za-z0-9_-]{32,128}$/.test(key) ? await sha256(key) : null;
-  const category = keyHash
-    ? await env.DB.prepare('SELECT id, name FROM categories WHERE key_hash = ?').bind(keyHash).first()
-    : null;
+  const user = keyHash ? await userByKey(env.DB, keyHash) : null; // nick registered through the chat
   const ipHash = await sha256(`${req.headers.get('CF-Connecting-IP') || ''}:${env.ADMIN_KEY}`);
-  return { admin, keyHash, category, ipHash };
+  return { admin, keyHash, user, ipHash };
 }
 
 const badgeJson = (row, base) => {
@@ -59,59 +56,97 @@ async function readJson(req) {
   try { return JSON.parse(text); } catch { throw new HttpError(400, 'Неверный JSON'); }
 }
 
-async function canManage(env, who, categoryId) {
-  if (who.admin) return true;
-  return Boolean(who.category && who.category.id === categoryId);
+// A category is managed by its owner (the user who created it) or the site owner.
+async function managedCategory(env, who, id) {
+  const cat = await env.DB.prepare('SELECT id, owner_id, name FROM categories WHERE id = ?').bind(String(id)).first();
+  if (!cat) throw new HttpError(404, 'Категория не найдена');
+  if (!who.admin && cat.owner_id !== who.user?.id) throw new HttpError(403, 'Изменять можно только свои категории');
+  return cat;
 }
 
+async function limited(env, ipHash, kind, max) {
+  const now = Date.now();
+  const n = await env.DB.prepare('SELECT COUNT(*) AS n FROM events WHERE ip_hash = ? AND kind = ? AND at > ?').bind(ipHash, kind, now - 3600_000).first('n');
+  if (n >= max) return true;
+  await env.DB.batch([
+    env.DB.prepare('INSERT INTO events (ip_hash, kind, at) VALUES (?, ?, ?)').bind(ipHash, kind, now),
+    env.DB.prepare('DELETE FROM events WHERE at < ?').bind(now - 3600_000),
+  ]);
+  return false;
+}
+
+function categoryName(body) {
+  const name = String(body.name || '').trim();
+  if (!CATEGORY_NAME.test(name)) throw new HttpError(400, 'Название категории: 1–25 символов');
+  return name;
+}
+
+const deleteCategoryStatements = (env, id) => [
+  env.DB.prepare('DELETE FROM images WHERE badge_id IN (SELECT id FROM badges WHERE category_id = ?)').bind(id),
+  env.DB.prepare('DELETE FROM badges WHERE category_id = ?').bind(id),
+  env.DB.prepare('DELETE FROM categories WHERE id = ?').bind(id),
+];
+
 const routes = {
+  // owners (nick + color) with their categories and badges: the "nick → categories → badges" tree
   async 'GET /state'(req, env, who, base) {
-    const [cats, badges] = await env.DB.batch([
-      env.DB.prepare('SELECT id, name FROM categories ORDER BY created_at'),
+    const [owners, cats, badges] = await env.DB.batch([
+      env.DB.prepare('SELECT DISTINCT u.id, u.nick, u.color FROM users u JOIN categories c ON c.owner_id = u.id ORDER BY u.nick COLLATE NOCASE'),
+      env.DB.prepare('SELECT id, owner_id, name FROM categories ORDER BY created_at'),
       env.DB.prepare('SELECT id, category_id, data, created_at FROM badges ORDER BY created_at'),
     ]);
-    return { categories: cats.results, badges: badges.results.map((r) => badgeJson(r, base)) };
+    return {
+      owners: owners.results,
+      categories: cats.results.map((c) => ({ id: c.id, ownerId: c.owner_id, name: c.name })),
+      badges: badges.results.map((r) => badgeJson(r, base)),
+    };
   },
 
   async 'GET /me'(req, env, who) {
-    return { category: who.category, admin: who.admin };
+    return { user: who.user, admin: who.admin };
   },
 
-  async 'PUT /me'(req, env, who) {
-    if (!who.keyHash) throw new HttpError(401, 'Нет ключа браузера');
-    const name = String((await readJson(req)).name || '').trim();
-    if (!CATEGORY_NAME.test(name)) throw new HttpError(400, 'Название категории: 2–25 символов');
-    const taken = await env.DB.prepare('SELECT id FROM categories WHERE name = ?').bind(name).first();
-    if (taken && taken.id !== who.category?.id) throw new HttpError(409, 'Такая категория уже есть');
-    if (who.category) {
-      await env.DB.prepare('UPDATE categories SET name = ? WHERE id = ?').bind(name, who.category.id).run();
-      return { category: { id: who.category.id, name }, admin: who.admin };
-    }
-    if (!who.admin) {
-      const n = await env.DB.prepare('SELECT COUNT(*) AS n FROM categories WHERE ip_hash = ?').bind(who.ipHash).first('n');
-      if (n >= MAX_CATEGORIES_PER_IP) throw new HttpError(429, 'С этого IP создано слишком много категорий');
-    }
+  async 'POST /categories'(req, env, who) {
+    if (!who.user) throw new HttpError(403, 'Сначала выберите ник в «Имя в чате»');
+    const name = categoryName(await readJson(req));
+    const n = await env.DB.prepare('SELECT COUNT(*) AS n FROM categories WHERE owner_id = ?').bind(who.user.id).first('n');
+    if (n >= MAX_CATEGORIES_PER_USER) throw new HttpError(400, `Максимум ${MAX_CATEGORIES_PER_USER} категорий`);
+    if (!who.admin && await limited(env, who.ipHash, 'category', LIMITS.categoriesPerHour)) throw new HttpError(429, 'Слишком много новых категорий, попробуйте позже');
     const id = newId();
-    await env.DB.prepare('INSERT INTO categories (id, name, key_hash, ip_hash, created_at) VALUES (?, ?, ?, ?, ?)')
-      .bind(id, name, who.keyHash, who.ipHash, new Date().toISOString()).run();
-    return { category: { id, name }, admin: who.admin };
+    try {
+      await env.DB.prepare('INSERT INTO categories (id, owner_id, name, created_at) VALUES (?, ?, ?, ?)').bind(id, who.user.id, name, new Date().toISOString()).run();
+    } catch { throw new HttpError(409, 'У вас уже есть такая категория'); }
+    return { id, ownerId: who.user.id, name };
+  },
+
+  async 'PUT /categories/:id'(req, env, who, base, id) {
+    const cat = await managedCategory(env, who, id);
+    const name = categoryName(await readJson(req));
+    try {
+      await env.DB.prepare('UPDATE categories SET name = ? WHERE id = ?').bind(name, cat.id).run();
+    } catch { throw new HttpError(409, 'Такая категория уже есть'); }
+    return { ok: true };
+  },
+
+  async 'DELETE /categories/:id'(req, env, who, base, id) {
+    const cat = await managedCategory(env, who, id);
+    await env.DB.batch(deleteCategoryStatements(env, cat.id));
+    return { ok: true };
+  },
+
+  // every category of one user (their whole branch in the tree)
+  async 'DELETE /owners/:id'(req, env, who, base, id) {
+    if (!who.admin && who.user?.id !== id) throw new HttpError(403, 'Удалять можно только свои категории');
+    const { results } = await env.DB.prepare('SELECT id FROM categories WHERE owner_id = ?').bind(id).all();
+    if (results.length) await env.DB.batch(results.flatMap((c) => deleteCategoryStatements(env, c.id)));
+    return { ok: true };
   },
 
   async 'POST /badges'(req, env, who, base) {
     const body = await readJson(req);
-    // owners upload into their own category; the site owner (admin) may upload into any category
-    let target = who.category;
-    if (who.admin && body.categoryId) {
-      target = await env.DB.prepare('SELECT id, name FROM categories WHERE id = ?').bind(String(body.categoryId)).first();
-      if (!target) throw new HttpError(404, 'Категория не найдена');
-    }
-    if (!target) throw new HttpError(403, 'Сначала создайте свою категорию');
-    if (!who.admin) {
-      const hourAgo = Date.now() - 3600_000;
-      const n = await env.DB.prepare('SELECT COUNT(*) AS n FROM uploads WHERE ip_hash = ? AND at > ?').bind(who.ipHash, hourAgo).first('n');
-      if (n >= MAX_UPLOADS_PER_IP_PER_HOUR) throw new HttpError(429, 'Слишком много загрузок, попробуйте позже');
-    }
-    const existing = await categoryBadges(env, target.id);
+    const cat = await managedCategory(env, who, body.categoryId);
+    if (!who.admin && await limited(env, who.ipHash, 'upload', LIMITS.uploadsPerHour)) throw new HttpError(429, 'Слишком много загрузок, попробуйте позже');
+    const existing = await categoryBadges(env, cat.id);
     if (existing.length >= MAX_BADGES_PER_CATEGORY) throw new HttpError(400, `Максимум ${MAX_BADGES_PER_CATEGORY} значков в категории`);
     const images = {};
     for (const k of IMAGE_KEYS[body.kind] || []) {
@@ -124,45 +159,21 @@ const routes = {
     const id = newId();
     const now = new Date().toISOString();
     await env.DB.batch([
-      env.DB.prepare('INSERT INTO badges (id, category_id, data, created_at) VALUES (?, ?, ?, ?)')
-        .bind(id, target.id, JSON.stringify(result.badge), now),
+      env.DB.prepare('INSERT INTO badges (id, category_id, data, created_at) VALUES (?, ?, ?, ?)').bind(id, cat.id, JSON.stringify(result.badge), now),
       ...Object.entries(images).map(([k, bytes]) => env.DB.prepare('INSERT INTO images (badge_id, key, bytes) VALUES (?, ?, ?)').bind(id, k, bytes)),
-      env.DB.prepare('INSERT INTO uploads (ip_hash, at) VALUES (?, ?)').bind(who.ipHash, Date.now()),
-      env.DB.prepare('DELETE FROM uploads WHERE at < ?').bind(Date.now() - 86400_000),
     ]);
-    return badgeJson({ id, category_id: target.id, data: JSON.stringify(result.badge), created_at: now }, base);
+    return badgeJson({ id, category_id: cat.id, data: JSON.stringify(result.badge), created_at: now }, base);
   },
 
   async 'DELETE /badges/:id'(req, env, who, base, id) {
     const row = await env.DB.prepare('SELECT id, category_id, data FROM badges WHERE id = ?').bind(id).first();
     if (!row) throw new HttpError(404, 'Значок не найден');
-    if (!(await canManage(env, who, row.category_id))) throw new HttpError(403, 'Удалять можно только свои значки');
+    await managedCategory(env, who, row.category_id);
     const blocker = deleteBlocker({ id, ...JSON.parse(row.data) }, await categoryBadges(env, row.category_id));
     if (blocker) throw new HttpError(409, blocker);
     await env.DB.batch([
       env.DB.prepare('DELETE FROM images WHERE badge_id = ?').bind(id),
       env.DB.prepare('DELETE FROM badges WHERE id = ?').bind(id),
-    ]);
-    return { ok: true };
-  },
-
-  async 'PUT /categories/:id'(req, env, who, base, id) {
-    if (!(await canManage(env, who, id))) throw new HttpError(403, 'Изменять можно только свою категорию');
-    const name = String((await readJson(req)).name || '').trim();
-    if (!CATEGORY_NAME.test(name)) throw new HttpError(400, 'Название категории: 2–25 символов');
-    const taken = await env.DB.prepare('SELECT id FROM categories WHERE name = ?').bind(name).first();
-    if (taken && taken.id !== id) throw new HttpError(409, 'Такая категория уже есть');
-    const { meta } = await env.DB.prepare('UPDATE categories SET name = ? WHERE id = ?').bind(name, id).run();
-    if (!meta.changes) throw new HttpError(404, 'Категория не найдена');
-    return { ok: true };
-  },
-
-  async 'DELETE /categories/:id'(req, env, who, base, id) {
-    if (!(await canManage(env, who, id))) throw new HttpError(403, 'Удалять можно только свою категорию');
-    await env.DB.batch([
-      env.DB.prepare('DELETE FROM images WHERE badge_id IN (SELECT id FROM badges WHERE category_id = ?)').bind(id),
-      env.DB.prepare('DELETE FROM badges WHERE category_id = ?').bind(id),
-      env.DB.prepare('DELETE FROM categories WHERE id = ?').bind(id),
     ]);
     return { ok: true };
   },

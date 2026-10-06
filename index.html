@@ -72,31 +72,19 @@
           <h3>Роль в канале</h3>
           <div class="picker" id="roleGrid"></div>
 
-          <!-- uploaded categories: one section each -->
-          <div id="categoryGrids"></div>
-
-          <section class="my-cat">
-            <div id="myCatCreate">
-              <h3>Своя категория значков</h3>
-              <p class="hint">Создайте категорию — она появится здесь у всех, а менять её сможете только вы.</p>
-              <form class="row" id="myCatForm">
-                <input class="field" id="myCatInput" maxlength="25" minlength="2" required placeholder="Название категории">
-                <button class="btn primary">Создать</button>
-              </form>
-            </div>
-            <div id="myCatUpload" hidden>
-              <h3>Моя категория: <span id="myCatName"></span></h3>
-              <p class="hint">PNG или ZIP-архив. Три файла <code>6_18.png</code>, <code>6_36.png</code>, <code>6_72.png</code> → значок подписчика,
-                любой другой квадратный PNG → значок категории.</p>
-              <div class="row">
-                <label class="btn primary file-btn">Загрузить значки
-                  <input type="file" id="myCatFiles" accept=".png,.zip,image/png,application/zip" multiple hidden></label>
-                <button type="button" class="btn" id="myCatManage">Управление</button>
-              </div>
-            </div>
-            <p class="status" id="myCatStatus" aria-live="polite"></p>
-            <ul class="bulk-report" id="myCatReport"></ul>
-          </section>
+          <h3>Значки пользователей</h3>
+          <p class="hint">Ник → категории → значки. Свои категории создаёте и наполняете здесь же (PNG или ZIP); менять их можете только вы.</p>
+          <div class="tree" id="badgeTree"></div>
+          <p class="status" id="treeStatus" aria-live="polite"></p>
+          <details class="key-box">
+            <summary>Перенести права на другое устройство</summary>
+            <p class="hint">Ник и категории привязаны к этому браузеру. Скопируйте ключ и вставьте его на другом устройстве.</p>
+            <div class="row"><button type="button" class="btn" id="copyKey">Скопировать мой ключ</button></div>
+            <form id="keyForm" class="row">
+              <input class="field" id="keyInput" type="password" placeholder="Вставить ключ" autocomplete="off">
+              <button class="btn">Применить</button>
+            </form>
+          </details>
 
           <h3>Значок подписчика</h3>
           <p class="hint">Отображается только на этом канале.</p>
@@ -131,9 +119,6 @@
           <div class="menu-section">
             <p class="menu-label">Мои настройки</p>
             <button class="menu-item" id="openIdentity2"><span>Имя в чате</span><span class="menu-right"><span class="menu-badges" id="settingsBadges"></span><svg class="chev" viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M9.293 17.293 14.586 12 9.293 6.707l1.414-1.414L17.414 12l-6.707 6.707-1.414-1.414Z"/></svg></span></button>
-            <button class="menu-item" id="openAdmin"><span>Моя категория</span><span class="menu-right"><span class="menu-value" id="menuCategory">не создана</span><svg class="chev" viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M9.293 17.293 14.586 12 9.293 6.707l1.414-1.414L17.414 12l-6.707 6.707-1.414-1.414Z"/></svg></span></button>
-            <label class="menu-item" id="bulkMenu"><span>Загрузить значки (PNG или ZIP)</span><span class="menu-right"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M11 15V7.414L8.207 10.207 6.793 8.793 12 3.586l5.207 5.207-1.414 1.414L13 7.414V15h-2Z"/><path d="M4 14v6h16v-6h2v8H2v-8h2Z"/></svg></span>
-              <input type="file" id="bulkMenuInput" accept=".png,.zip,image/png,application/zip" multiple hidden></label>
             <label class="menu-item toggle"><span>Метки времени</span><input type="checkbox" role="switch" id="tsToggle"></label>
           </div>
         </div>
@@ -160,112 +145,6 @@
   </aside>
 </div>
 
-<!-- Badge manager: anyone can upload into their own category; rights = secret key of this browser, owner key = everything -->
-<dialog class="admin" id="admin">
-  <div class="pop-head">
-    <span>Значки</span>
-    <button class="icon-btn" data-close-dialog aria-label="Закрыть"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M13.414 12l5.293-5.293-1.414-1.414L12 10.586 6.707 5.293 5.293 6.707 10.586 12l-5.293 5.293 1.414 1.414L12 13.414l5.293 5.293 1.414-1.414L13.414 12Z"/></svg></button>
-  </div>
-  <div class="admin-body">
-    <p class="admin-note" id="adminBadge" hidden>Режим владельца: можно удалять любые значки и категории.</p>
-    <section>
-      <h3>Моя категория</h3>
-      <p class="muted" id="noCategory">Создайте категорию — в ней будут ваши значки. Удалять их сможете только вы (с этого браузера).</p>
-      <p class="muted" id="hasCategory" hidden>Ваша категория: <b id="myCategoryName"></b>. Права привязаны к этому браузеру.</p>
-      <form id="categoryForm" class="row">
-        <input class="field" id="categoryInput" maxlength="25" minlength="2" required placeholder="Название (ник)">
-        <button class="btn primary">Сохранить</button>
-      </form>
-      <details class="key-box">
-        <summary>Перенести права на другое устройство</summary>
-        <p class="muted">Скопируйте ключ здесь и вставьте его в другом браузере. Никому его не давайте.</p>
-        <div class="row">
-          <button type="button" class="btn" id="copyKey">Скопировать мой ключ</button>
-        </div>
-        <form id="keyForm" class="row">
-          <input class="field" id="keyInput" type="password" placeholder="Вставить ключ" autocomplete="off">
-          <button class="btn">Применить</button>
-        </form>
-      </details>
-    </section>
-      <label class="target-box" id="targetBox" hidden>Загружать в категорию
-        <select class="field" id="targetCategory"></select>
-      </label>
-      <div class="tabs" role="tablist">
-        <button class="tab active" data-tab="drop" role="tab">Creator Badge Drop</button>
-        <button class="tab" data-tab="sub" role="tab">Значок подписчика</button>
-        <button class="tab" data-tab="global" role="tab">Общий значок</button>
-      </div>
-
-      <form class="upload" id="form-drop" data-kind="drop">
-        <p class="spec">По <a href="https://help.twitch.tv/s/article/creator-badge-rewards" target="_blank" rel="noopener">справке Twitch</a>:
-          квадратный <b>PNG</b>, <b>без анимации</b>, до <b>25 КБ</b>, рекомендуется от <b>120×120</b>; название до <b>25 символов</b>.
-          В событии до 3 значков: за подписки/подарки (<b>1–100</b>, обязательный), за просмотр (<b>до 24 ч</b>) и Top Supporter (топ 1/3/5/10 дарителей).
-          Событие не дольше <b>28 дней</b>, одновременно активно только одно событие.</p>
-        <label>Событие<input class="field" name="event" required maxlength="60" placeholder="Subathon 2026" list="eventList"></label>
-        <datalist id="eventList"></datalist>
-        <div class="row">
-          <label>Начало<input class="field" type="datetime-local" name="start" required></label>
-          <label>Конец<input class="field" type="datetime-local" name="end" required></label>
-        </div>
-        <label>Название значка (до 25 символов)<input class="field" name="title" required maxlength="25" placeholder="28' Bday"></label>
-        <div class="row">
-          <label>Награда
-            <select class="field" name="unlock">
-              <option value="sub">Подписки / подарочные подписки</option>
-              <option value="watch">Время просмотра</option>
-              <option value="top">Top Supporter</option>
-            </select>
-          </label>
-          <label class="amount"><span id="amountLabel"></span><input class="field" type="number" name="amount" step="1" required></label>
-          <label class="top" hidden>Мест в топе
-            <select class="field" name="top"><option>1</option><option>3</option><option>5</option><option>10</option></select>
-          </label>
-        </div>
-        <label>Изображение<input class="field" type="file" name="file" accept="image/png" required></label>
-        <div class="check" aria-live="polite"></div>
-        <button class="btn primary">Загрузить значок</button>
-      </form>
-
-      <form class="upload" id="form-sub" data-kind="sub" hidden>
-        <p class="spec">По <a href="https://help.twitch.tv/s/article/subscriber-badge-guide" target="_blank" rel="noopener">справке Twitch</a>:
-          три <b>PNG</b> с <b>прозрачным фоном</b> — <b>18×18, 36×36, 72×72</b>, каждый до <b>25 КБ</b>.</p>
-        <label>Стаж подписки
-          <select class="field" name="months"></select>
-        </label>
-        <label>18×18<input class="field" type="file" name="a18" accept="image/png" required></label>
-        <label>36×36<input class="field" type="file" name="a36" accept="image/png" required></label>
-        <label>72×72<input class="field" type="file" name="a72" accept="image/png" required></label>
-        <div class="check" aria-live="polite"></div>
-        <button class="btn primary">Загрузить значок</button>
-      </form>
-
-      <form class="upload" id="form-global" data-kind="global" hidden>
-        <p class="spec">Для имитации глобальных значков Twitch (их загружает только Twitch). Квадратный PNG, от 18×18, до 100 КБ.</p>
-        <label>Название<input class="field" name="title" required maxlength="40"></label>
-        <label>Описание (необязательно)<input class="field" name="desc" maxlength="80"></label>
-        <label>Изображение<input class="field" type="file" name="file" accept="image/png" required></label>
-        <div class="check" aria-live="polite"></div>
-        <button class="btn primary">Загрузить значок</button>
-      </form>
-
-      <section class="bulk">
-        <h3>Массовая загрузка</h3>
-        <p class="spec">Можно выбрать несколько <b>PNG</b> или <b>ZIP-архив</b> с ними.
-          Три файла одного значка с размерами в имени — <code>6_18.png</code>, <code>6_36.png</code>, <code>6_72.png</code>
-          (или <code>6-18x18.png</code>) — станут <b>значком подписчика</b> (число в имени = месяцы, иначе ближайший свободный стаж).
-          Любой другой квадратный PNG станет значком категории с названием из имени файла.
-          Каждый файл проверяется по правилам Twitch.</p>
-        <label class="btn bulk-pick">Выбрать файлы или архив
-          <input type="file" id="bulkInput" accept=".png,.zip,image/png,application/zip" multiple hidden></label>
-        <ul class="bulk-report" id="bulkReport"></ul>
-      </section>
-
-      <h3>Все значки</h3>
-      <div id="badgeList" class="badge-list"></div>
-    <p class="status" id="adminStatus" aria-live="polite"></p>
-  </div>
-</dialog>
 
 <div class="tooltip" id="tooltip" hidden></div>
 <script type="module" src="app.js?v=__V__"></script>

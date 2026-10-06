@@ -58,8 +58,9 @@ async function api(path, { method = 'GET', body } = {}) {
 }
 
 /* ---------- data ---------- */
-let state = store.get('tbc.state', { categories: [], badges: [] }); // cached copy renders instantly, then refreshed
-let me = { category: null, admin: false };
+let state = { owners: [], categories: [], badges: [], ...store.get('tbc.state', {}) }; // cached copy renders instantly
+if (!Array.isArray(state.owners)) state.owners = [];
+let me = { user: null, admin: false };
 let twitch = store.get('tbc.twitch', []); // [{ set, versions: [{ id, title, desc, x1, x2, x4 }] }]
 
 const twitchBadge = (set, v) => ({
@@ -81,12 +82,12 @@ async function loadTwitch() {
   } catch { /* keep the cached copy */ }
 }
 
-async function refresh() {
+async function refresh(force = false) {
   try {
     const [s, m] = await Promise.all([api('/state'), api('/me')]);
     $('#apiError').hidden = true;
     // periodic refreshes must not rebuild the open pickers (scroll, search) when nothing changed
-    if (JSON.stringify([s, m]) === JSON.stringify([state, me])) return;
+    if (!force && JSON.stringify([s, m]) === JSON.stringify([state, me])) return;
     state = s; me = m;
     store.set('tbc.state', state);
   } catch (err) {
@@ -109,9 +110,6 @@ function byId(id) {
   return v ? twitchBadge(set, v) : null;
 }
 const categoryName = (id) => state.categories.find((c) => c.id === id)?.name ?? '—';
-// Category that uploads go to: your own, or (site owner only) the one picked in the manager.
-const targetCategoryId = () => (me.admin && $('#targetCategory').value) || me.category?.id || null;
-const ownBadges = () => state.badges.filter((b) => b.categoryId === targetCategoryId());
 
 const currentBadges = () => SLOTS.map((k) => byId(profile[k])).filter(Boolean).map(badgeView);
 
@@ -258,6 +256,7 @@ function connect() {
 }
 
 let registered = null;
+let lastNick = null;
 function applyServerProfile(me) {
   registered = me;
   $('#nickError').hidden = true;
@@ -267,6 +266,7 @@ function applyServerProfile(me) {
   if (document.activeElement !== $('#nickInput')) $('#nickInput').value = me.nick;
   $('#customColor').value = me.color.toLowerCase();
   renderPreview();
+  if (me.nick !== lastNick) { lastNick = me.nick; refresh(); } // the user categories belong to
 }
 
 /* ---------- viewer card (click on a nickname) ---------- */
@@ -387,7 +387,6 @@ tsToggle.onchange = () => { settings.timestamps = tsToggle.checked; store.set('t
 $('#clearChat').onclick = () => { if (chatAdmin) wsSend({ type: 'clear' }); togglePopover(null); };
 // Moderation entries exist only for the owner.
 function renderSettings() { $('#modSection').hidden = !chatAdmin; renderPreview(); }
-const renderMenuCategory = () => { $('#menuCategory').textContent = me.category?.name ?? 'не создана'; };
 
 /* ---------- tooltip ---------- */
 const tooltip = $('#tooltip');
@@ -442,19 +441,168 @@ function renderPicker(container, key, groups, noneLabel) {
     keyed(el('div', { className: 'badge-grid' }, ...(i === 0 ? [none] : []), ...g.badges.map((b) => badgeTile(b, key))), `${key}:${g.name ?? ''}`))));
 }
 
-const KIND_ORDER = { sub: 0, drop: 1, global: 2 };
+const KIND_ORDER = { sub: 0, badge: 1, drop: 1, global: 2 };
 const slotOf = (b) => (SLOT_OF_UPLOAD[b.kind] === 'sub' ? 'subBadge' : 'otherBadge');
 
-// Each uploader category is its own section right under the role picker.
-function renderCategories() {
-  $('#categoryGrids').replaceChildren(...state.categories.map((cat) => {
-    const badges = state.badges.filter((b) => b.categoryId === cat.id)
-      .sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || (a.months ?? 0) - (b.months ?? 0));
-    if (!badges.length) return null;
-    return el('section', { className: 'cat-section' },
-      el('h3', { textContent: cat.name }),
-      keyed(el('div', { className: 'badge-grid' }, ...badges.map((b) => badgeTile(b, slotOf(b)))), `cat:${cat.id}`));
-  }).filter(Boolean));
+/* ---------- uploaded badges: nick → categories → badges ---------- */
+const icon = (d) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="${d}"/></svg>`;
+const ICONS = {
+  chevron: icon('M9.293 17.293 14.586 12 9.293 6.707l1.414-1.414L17.414 12l-6.707 6.707-1.414-1.414Z'),
+  upload: icon('M11 15V7.414L8.207 10.207 6.793 8.793 12 3.586l5.207 5.207-1.414 1.414L13 7.414V15h-2Zm-7-1v6h16v-6h2v8H2v-8h2Z'),
+  edit: icon('M17.586 3a2 2 0 0 1 2.828 0l.586.586a2 2 0 0 1 0 2.828L9.414 18H6v-3.414L17.586 3ZM18 5.414 8 15.414V16h.586l10-10L18 5.414ZM3 20h18v2H3v-2Z'),
+  trash: icon('M9 2h6v2h6v2H3V4h6V2ZM5 8h2v12h10V8h2v14H5V8Zm4 2h2v8H9v-8Zm4 0h2v8h-2v-8Z'),
+  close: icon('M13.414 12l5.293-5.293-1.414-1.414L12 10.586 6.707 5.293 5.293 6.707 10.586 12l-5.293 5.293 1.414 1.414L12 13.414l5.293 5.293 1.414-1.414L13.414 12Z'),
+};
+const iconBtn = (name, label, onclick) => {
+  const b = el('button', { type: 'button', className: 'tree-btn', title: label, ariaLabel: label });
+  b.innerHTML = ICONS[name];
+  if (onclick) b.onclick = onclick;
+  return b;
+};
+
+// open/closed state of nick and category nodes, per browser
+const treeOpen = new Map(Object.entries(store.get('tbc.tree', {})));
+const isOpen = (key, fallback) => treeOpen.get(key) ?? fallback;
+const setOpen = (key, open) => { treeOpen.set(key, open); store.set('tbc.tree', Object.fromEntries(treeOpen)); };
+
+function treeNode(key, defaultOpen, head, body, className) {
+  const open = isOpen(key, defaultOpen);
+  const toggle = el('button', { type: 'button', className: 'tree-toggle' });
+  toggle.setAttribute('aria-expanded', String(open));
+  toggle.innerHTML = ICONS.chevron;
+  toggle.append(...head.label);
+  const node = el('div', { className: `tree-node ${className}` },
+    el('div', { className: 'tree-head' }, toggle, ...head.actions), body);
+  body.hidden = !open;
+  toggle.onclick = () => { body.hidden = !body.hidden; toggle.setAttribute('aria-expanded', String(!body.hidden)); setOpen(key, !body.hidden); applyCollapse(); };
+  return node;
+}
+
+const myId = () => me.user?.id ?? null;
+const reports = new Map(); // category id -> [{ ok, text }]
+const reportLine = ({ ok, text }) => el('li', { className: ok ? 'ok' : 'err', textContent: (ok ? '✓ ' : '✕ ') + text });
+const canManage = (ownerId) => me.admin || ownerId === myId();
+
+function confirmClick(btn, action) {
+  btn.onclick = () => {
+    if (btn.dataset.armed !== '1') {
+      btn.dataset.armed = '1';
+      btn.classList.add('armed');
+      btn.title = 'Нажмите ещё раз, чтобы удалить';
+      setTimeout(() => { btn.dataset.armed = ''; btn.classList.remove('armed'); }, 3000);
+      return;
+    }
+    action();
+  };
+}
+
+const treeStatus = (text, isErr = false) => { const s = $('#treeStatus'); s.textContent = text; s.classList.toggle('err', isErr); };
+async function act(fn) {
+  try { await fn(); } catch (err) { treeStatus(err.message, true); }
+}
+
+function categoryNode(cat, owner) {
+  const manage = canManage(owner.id);
+  const badges = state.badges.filter((b) => b.categoryId === cat.id)
+    .sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || (a.months ?? 0) - (b.months ?? 0));
+  const grid = keyed(el('div', { className: 'badge-grid' }, ...badges.map((b) => {
+    const tile = badgeTile(b, slotOf(b));
+    if (!manage) return tile;
+    const del = iconBtn('close', 'Удалить значок');
+    del.classList.add('tile-del');
+    confirmClick(del, () => act(async () => {
+      await api(`/badges/${b.id}`, { method: 'DELETE' });
+      await refresh();
+      treeStatus(`Значок «${b.title}» удалён.`);
+    }));
+    return el('div', { className: 'tile-wrap' }, tile, del);
+  })), `cat:${cat.id}`);
+  // upload results survive the re-render that follows every upload
+  const report = el('ul', { className: 'bulk-report' }, ...(reports.get(cat.id) || []).map(reportLine));
+  report.dataset.report = cat.id;
+  const body = el('div', { className: 'tree-body' },
+    badges.length ? grid : el('p', { className: 'empty', textContent: manage ? 'Пусто — загрузите PNG или ZIP' : 'Пусто' }), report);
+  const name = el('span', { className: 'tree-name', textContent: cat.name });
+  const actions = [];
+  if (manage) {
+    const file = el('input', { type: 'file', accept: '.png,.zip,image/png,application/zip', multiple: true, hidden: true });
+    file.onchange = async () => {
+      const files = [...file.files];
+      file.value = '';
+      setOpen(`c:${cat.id}`, true);
+      reports.set(cat.id, []);
+      report.replaceChildren();
+      await bulkImport(files, (ok, text) => {
+        const item = { ok, text };
+        reports.get(cat.id).push(item);
+        document.querySelector(`#badgeTree [data-report="${cat.id}"]`)?.append(reportLine(item));
+      }, treeStatus, cat.id);
+    };
+    const up = el('label', { className: 'tree-btn', title: 'Загрузить значки (PNG или ZIP)', ariaLabel: 'Загрузить значки' }, file);
+    up.insertAdjacentHTML('afterbegin', ICONS.upload);
+    const ren = iconBtn('edit', 'Переименовать', () => {
+      const input = el('input', { className: 'field tree-rename', value: cat.name, maxLength: 25 });
+      name.replaceWith(input);
+      input.focus(); input.select();
+      const save = () => act(async () => {
+        const v = input.value.trim();
+        if (v && v !== cat.name) await api(`/categories/${cat.id}`, { method: 'PUT', body: { name: v } });
+        await refresh(true);
+      });
+      input.onkeydown = (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') refresh(true); };
+      input.onblur = save;
+    });
+    const del = iconBtn('trash', 'Удалить категорию');
+    confirmClick(del, () => act(async () => {
+      await api(`/categories/${cat.id}`, { method: 'DELETE' });
+      await refresh();
+      treeStatus(`Категория «${cat.name}» удалена.`);
+    }));
+    actions.push(up, ren, del);
+  }
+  return treeNode(`c:${cat.id}`, true, { label: [name, el('span', { className: 'tree-count', textContent: String(badges.length) })], actions }, body, 'tree-cat');
+}
+
+function renderTree() {
+  const owners = [...state.owners];
+  // you always see your own branch (to create the first category), first in the list
+  if (me.user && !owners.some((o) => o.id === me.user.id)) owners.unshift(me.user);
+  owners.sort((a, b) => (b.id === myId()) - (a.id === myId()));
+  $('#badgeTree').replaceChildren(...owners.map((owner) => {
+    const mine = owner.id === myId();
+    const cats = state.categories.filter((c) => c.ownerId === owner.id);
+    const count = state.badges.filter((b) => cats.some((c) => c.id === b.categoryId)).length;
+    const body = el('div', { className: 'tree-body' }, ...cats.map((c) => categoryNode(c, owner)));
+    if (mine) {
+      const input = el('input', { className: 'field', placeholder: 'Новая категория', maxLength: 25, required: true });
+      const form = el('form', { className: 'tree-new' }, input, el('button', { className: 'btn', textContent: 'Создать' }));
+      form.onsubmit = (e) => {
+        e.preventDefault();
+        act(async () => {
+          const cat = await api('/categories', { method: 'POST', body: { name: input.value } });
+          setOpen(`c:${cat.id}`, true);
+          await refresh();
+          treeStatus(`Категория «${cat.name}» создана — загрузите в неё PNG или ZIP.`);
+        });
+      };
+      body.append(form);
+    }
+    const actions = [];
+    if (canManage(owner.id) && cats.length) {
+      const del = iconBtn('trash', mine ? 'Удалить все мои категории' : `Удалить все категории ${owner.nick}`);
+      confirmClick(del, () => act(async () => {
+        await api(`/owners/${owner.id}`, { method: 'DELETE' });
+        await refresh();
+        treeStatus(`Категории ${owner.nick} удалены.`);
+      }));
+      actions.push(del);
+    }
+    const nick = el('span', { className: 'tree-name tree-nick', textContent: owner.nick + (mine ? ' (вы)' : '') });
+    nick.style.color = readable(owner.color);
+    return treeNode(`o:${owner.id}`, mine, { label: [nick, el('span', { className: 'tree-count', textContent: `${cats.length} кат. · ${count}` })], actions }, body, 'tree-owner');
+  }));
+  if (!owners.length) $('#badgeTree').append(el('p', { className: 'empty', textContent: 'Пока никто не загрузил значки' }));
+  applyCollapse();
 }
 
 function pick(key, value) {
@@ -485,7 +633,7 @@ function renderIdentity() {
     if (profile[k] && !byId(profile[k]) && (twitch.length || !profile[k].startsWith('tw:'))) { profile[k] = null; saveProfile(); }
   }
   renderPicker($('#roleGrid'), 'role', [{ badges: twitchSets(ROLE_SETS) }], 'Зритель');
-  renderCategories();
+  renderTree();
   renderPicker($('#channelGrid'), 'subBadge', [
     { name: 'Twitch (по умолчанию)', badges: twitchSets(SUB_SETS) },
   ], 'Без значка');
@@ -494,7 +642,6 @@ function renderIdentity() {
     { name: 'Общие значки Twitch', badges: twitchGlobal() },
   ], 'Без значка');
   filterGlobal();
-  renderMyCategory();
 
   $('#colorGrid').replaceChildren(...COLORS.map((c) => {
     const b = el('button', { type: 'button', className: 'color-opt', title: c, ariaLabel: `Цвет ${c}`, style: `background:${c}` });
@@ -548,234 +695,37 @@ $('#nickInput').addEventListener('input', (e) => {
 $('#nickInput').addEventListener('blur', (e) => { e.target.value = profile.nick; });
 $('#customColor').addEventListener('input', (e) => pick('color', e.target.value.toUpperCase()));
 
-function renderAll() {
-  renderIdentity();
-  renderManager();
-  renderMenuCategory();
-}
+const renderAll = () => renderIdentity();
 
-/* ---------- badge manager dialog ---------- */
-const dialog = $('#admin');
-const status = (text, isErr = false) => { const s = $('#adminStatus'); s.textContent = text; s.classList.toggle('err', isErr); };
-
-async function run(btn, fn) {
-  btn.disabled = true;
-  try { await fn(); } catch (err) { status(err.message, true); } finally { btn.disabled = false; }
-}
-
-function confirmClick(btn, label, action) {
-  btn.onclick = () => {
-    if (btn.dataset.armed !== '1') {
-      btn.dataset.armed = '1';
-      btn.textContent = 'Точно?';
-      setTimeout(() => { btn.dataset.armed = ''; btn.textContent = label; }, 3000);
-      return;
-    }
-    run(btn, action);
-  };
-}
-
-function renderManager() {
-  $('#adminBadge').hidden = !me.admin;
-  $('#noCategory').hidden = Boolean(me.category);
-  $('#hasCategory').hidden = !me.category;
-  if (me.category) {
-    $('#myCategoryName').textContent = me.category.name;
-    if (document.activeElement !== $('#categoryInput')) $('#categoryInput').value = me.category.name;
-  } else if (!$('#categoryInput').value) $('#categoryInput').value = profile.nick;
-
-  // site owner: choose which category uploads go to
-  const sel = $('#targetCategory');
-  const keep = sel.value;
-  sel.replaceChildren(...[...state.categories].sort((a, b) => (b.id === me.category?.id) - (a.id === me.category?.id))
-    .map((c) => el('option', { value: c.id, textContent: c.name + (c.id === me.category?.id ? ' (моя)' : '') })));
-  sel.value = state.categories.some((c) => c.id === keep) ? keep : (me.category?.id ?? sel.options[0]?.value ?? '');
-  $('#targetBox').hidden = !me.admin || !state.categories.length;
-  const events = new Set(ownBadges().filter((b) => b.kind === 'drop').map((b) => b.event.name));
-  $('#eventList').replaceChildren(...[...events].map((value) => el('option', { value })));
-
-  const box = $('#badgeList');
-  const cats = [...state.categories].sort((a, b) => (b.id === me.category?.id) - (a.id === me.category?.id));
-  box.replaceChildren(...(cats.length ? cats.map((cat) => {
-    const mine = cat.id === me.category?.id;
-    const canEdit = mine || me.admin;
-    const badges = state.badges.filter((b) => b.categoryId === cat.id);
-    const head = el('div', { className: 'cat-head' });
-    head.dataset.name = cat.name;
-    if (canEdit) {
-      const nameInput = el('input', { className: 'field', value: cat.name, maxLength: 25, minLength: 2, ariaLabel: 'Название категории' });
-      const save = el('button', { className: 'btn', textContent: 'Переименовать' });
-      save.onclick = () => run(save, async () => {
-        await api(`/categories/${cat.id}`, { method: 'PUT', body: { name: nameInput.value } });
-        await refresh();
-        status(`Категория переименована в «${nameInput.value.trim()}».`);
-      });
-      head.append(nameInput, save);
-    } else head.append(el('b', { textContent: cat.name }));
-    head.append(el('span', { className: 'muted', textContent: `${mine ? 'моя · ' : ''}${badges.length} шт.` }));
-    if (canEdit) {
-      const del = el('button', { className: 'btn danger', textContent: 'Удалить категорию' });
-      confirmClick(del, 'Удалить категорию', async () => {
-        await api(`/categories/${cat.id}`, { method: 'DELETE' });
-        await refresh();
-        status(`Категория «${cat.name}» удалена.`);
-      });
-      head.append(del);
-    }
-    return el('div', { className: 'cat' }, head, ...badges.map((b) => {
-      const v = badgeView(b);
-      const row = el('div', { className: 'badge-item' },
-        el('img', { src: bigSrc(v.images), alt: '' }),
-        el('div', { className: 'info' }, el('b', { textContent: v.title }), el('span', { textContent: v.desc })));
-      if (canEdit) {
-        const del = el('button', { className: 'btn danger', textContent: 'Удалить' });
-        confirmClick(del, 'Удалить', async () => {
-          const blocker = deleteBlocker(b, badges);
-          if (blocker) throw new Error(blocker);
-          await api(`/badges/${b.id}`, { method: 'DELETE' });
-          await refresh();
-          status(`Значок «${b.title}» удалён.`);
-        });
-        row.append(del);
-      }
-      return row;
-    }));
-  }) : [el('span', { className: 'empty', textContent: 'Значков пока нет' })]));
-}
-
-$('#openAdmin').onclick = () => {
-  togglePopover(null); status('');
-  if (!me.category) $('#categoryInput').value = profile.nick;
-  renderManager(); dialog.showModal(); refresh();
-};
-$('[data-close-dialog]').onclick = () => dialog.close();
-$('#targetCategory').addEventListener('change', renderManager);
-dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
-
-$('#categoryForm').addEventListener('submit', (e) => {
-  e.preventDefault();
-  run(e.submitter, async () => {
-    me = await api('/me', { method: 'PUT', body: { name: $('#categoryInput').value } });
-    await refresh();
-    status(`Категория «${me.category.name}» сохранена.`);
-  });
-});
-
-// Moving rights to another browser = copying the key there.
+/* ---------- moving rights to another browser = copying the key there ---------- */
 $('#copyKey').onclick = async () => {
-  try { await navigator.clipboard.writeText(browserKey); status('Ключ скопирован. Вставьте его на другом устройстве.'); } catch { status(browserKey); }
+  try { await navigator.clipboard.writeText(browserKey); treeStatus('Ключ скопирован — вставьте его на другом устройстве.'); } catch { treeStatus(browserKey); }
 };
 $('#keyForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const key = $('#keyInput').value.trim();
-  if (!/^[A-Za-z0-9_-]{32,128}$/.test(key)) { status('Неверный ключ', true); return; }
-  browserKey = key;
+  if (!/^[A-Za-z0-9_-]{32,128}$/.test(key)) { treeStatus('Неверный ключ', true); return; }
   store.set('tbc.key', key);
-  $('#keyInput').value = '';
-  status('Ключ применён.');
-  refresh();
+  location.reload(); // the chat socket and API both identify by this key
 });
-
-document.querySelectorAll('.tab').forEach((t) => {
-  t.onclick = () => {
-    document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === t));
-    document.querySelectorAll('.upload').forEach((f) => { f.hidden = f.dataset.kind !== t.dataset.tab; });
-  };
-});
-
-/* ---------- upload forms ---------- */
-const dropForm = $('#form-drop');
-function fillAmounts() {
-  const type = dropForm.elements.unlock.value;
-  $('.top', dropForm).hidden = type !== 'top';
-  $('.amount', dropForm).hidden = type === 'top';
-  const amount = dropForm.elements.amount;
-  amount.required = type !== 'top';
-  if (type === 'top') return;
-  const [min, max] = UNLOCK_RANGE[type];
-  Object.assign(amount, { min, max, value: Math.min(Math.max(Number(amount.value) || min, min), max) });
-  $('#amountLabel').textContent = type === 'watch' ? `Часов просмотра (${min}–${max})` : `Подписок или подарков (${min}–${max})`;
-}
-const localDT = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-function resetDropForm() {
-  fillAmounts();
-  const start = new Date();
-  start.setHours(start.getHours() + 1, 0, 0, 0);
-  dropForm.elements.start.value = localDT(start);
-  dropForm.elements.end.value = localDT(new Date(start.getTime() + 7 * 86400000));
-}
-dropForm.elements.unlock.addEventListener('change', fillAmounts);
-// all badges of one event share its dates: picking an existing event fills them in
-dropForm.elements.event.addEventListener('input', () => {
-  const name = dropForm.elements.event.value.trim().toLowerCase();
-  const ev = ownBadges().find((b) => b.kind === 'drop' && b.event.name.toLowerCase() === name);
-  if (ev) { dropForm.elements.start.value = ev.event.start; dropForm.elements.end.value = ev.event.end; }
-});
-resetDropForm();
-
-$('#form-sub').elements.months.replaceChildren(...SUB_MONTHS.map((m) => el('option', { value: m, textContent: `${m} мес.` })));
-
-const fileBytes = async (input) => (input.files[0] ? new Uint8Array(await input.files[0].arrayBuffer()) : null);
-
-async function readForm(form) {
-  const f = form.elements;
-  const kind = form.dataset.kind;
-  const images = {};
-  const sources = { drop: { x4: f.file }, sub: { x1: f.a18, x2: f.a36, x4: f.a72 }, global: { x4: f.file } }[kind];
-  for (const [k, input] of Object.entries(sources)) { const b = await fileBytes(input); if (b) images[k] = b; }
-  if (kind === 'drop') {
-    const type = f.unlock.value;
-    return {
-      kind, title: f.title.value, images,
-      event: { name: f.event.value, start: f.start.value, end: f.end.value },
-      unlock: { type, amount: Number(type === 'top' ? f.top.value : f.amount.value) },
-    };
-  }
-  if (kind === 'sub') return { kind, months: Number(f.months.value), images };
-  return { kind, title: f.title.value, desc: f.desc.value, images };
-}
-
-const dataUrl = (bytes) => `data:image/png;base64,${btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(''))}`;
-
-function renderCheck(form, result, images) {
-  const ul = el('ul');
-  for (const i of result.items) ul.append(el('li', { className: i.level, textContent: (i.level === 'ok' ? '✓ ' : i.level === 'err' ? '✕ ' : '! ') + i.text }));
-  const prev = el('div', { className: 'previews' });
-  for (const bytes of Object.values(images)) {
-    const src = dataUrl(bytes);
-    // how it looks at chat size (18px), 2x and tooltip size
-    prev.append(el('img', { src, width: 18, height: 18, alt: '18px' }), el('img', { src, width: 36, height: 36, alt: '36px' }), el('img', { src, width: 72, height: 72, alt: '72px' }));
-  }
-  $('.check', form).replaceChildren(ul, prev.children.length ? prev : '');
-}
-
-for (const form of document.querySelectorAll('.upload')) {
-  const check = async (requireImages) => {
-    const input = await readForm(form);
-    const result = validateBadge(input, ownBadges(), { requireImages });
-    renderCheck(form, result, input.images);
-    return { input, result };
-  };
-  form.addEventListener('change', () => check(false));
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    run(e.submitter, async () => {
-      if (!targetCategoryId()) throw new Error('Сначала создайте свою категорию');
-      const { input, result } = await check(true);
-      if (result.failed) throw new Error('Исправьте ошибки выше');
-      status('Загрузка…');
-      const images = Object.fromEntries(Object.entries(input.images).map(([k, b]) => [k, dataUrl(b).split(',')[1]]));
-      const badge = await api('/badges', { method: 'POST', body: { ...input, images, categoryId: targetCategoryId() } });
-      form.reset();
-      if (form === dropForm) resetDropForm();
-      $('.check', form).replaceChildren();
-      await refresh();
-      status(`Значок «${badge.title}» добавлен.`);
-    });
-  });
-}
 
 /* ---------- bulk import: PNG files or a ZIP archive ---------- */
+const dataUrl = (bytes) => `data:image/png;base64,${btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(''))}`;
+
+// Twitch: subscriber badges "must have a transparent background". An alpha channel alone isn't enough,
+// so check the actual pixels (the server can only check the PNG header).
+async function hasTransparency(bytes) {
+  try {
+    const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+    const c = new OffscreenCanvas(bmp.width, bmp.height);
+    const ctx = c.getContext('2d');
+    ctx.drawImage(bmp, 0, 0);
+    const px = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+    for (let i = 3; i < px.length; i += 4) if (px[i] < 255) return true;
+    return false;
+  } catch { return true; } // undecodable files are rejected by the PNG checks anyway
+}
+
 // Minimal ZIP reader (stored / deflate entries) on top of the browser's DecompressionStream.
 async function unzip(bytes) {
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -824,14 +774,11 @@ function planImport(files) {
     if (g.sizes[18] && g.sizes[36] && g.sizes[72]) plan.push({ kind: 'sub', name: g.name, files: [g.sizes[18], g.sizes[36], g.sizes[72]] });
     else singles.push(...Object.values(g.sizes).map((f) => ({ ...f, title: f.name.split('/').pop().replace(/\.png$/i, '').slice(0, 40) })));
   }
-  for (const f of singles) plan.push({ kind: 'global', name: f.title, files: [f] });
+  for (const f of singles) plan.push({ kind: 'badge', name: f.title.slice(0, 25), files: [f] });
   return plan;
 }
 
-async function bulkImport(fileList, report = $('#bulkReport'), say = status, categoryId = targetCategoryId()) {
-  const line = (ok, text) => report.append(el('li', { className: ok ? 'ok' : 'err', textContent: (ok ? '✓ ' : '✕ ') + text }));
-  report.replaceChildren();
-  if (!categoryId) { say('Сначала создайте свою категорию', true); return; }
+async function bulkImport(fileList, line, say, categoryId) {
   const files = [];
   for (const file of fileList) {
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -852,58 +799,27 @@ async function bulkImport(fileList, report = $('#bulkReport'), say = status, cat
       const used = new Set(own.filter((b) => b.kind === 'sub').map((b) => b.months));
       const months = SUB_MONTHS.includes(fromName) && !used.has(fromName) ? fromName : SUB_MONTHS.find((mo) => !used.has(mo));
       input = { kind: 'sub', months, images: { x1: item.files[0].bytes, x2: item.files[1].bytes, x4: item.files[2].bytes } };
-    } else input = { kind: 'global', title: item.name, desc: '', images: { x4: item.files[0].bytes } };
-    const label = item.kind === 'sub' ? `${item.name} → значок подписчика (${input.months} мес.)` : `${item.name} → значок категории`;
+    } else input = { kind: 'badge', title: item.name, images: { x4: item.files[0].bytes } };
+    const label = item.kind === 'sub' ? `${item.name} → значок подписчика (${input.months} мес.)` : `${item.name} → значок канала`;
     const check = validateBadge(input, own);
+    if (input.kind === 'sub') {
+      for (const [k, size] of [['x1', 18], ['x2', 36], ['x4', 72]]) {
+        if (!(await hasTransparency(input.images[k]))) { check.failed = true; check.items.push({ level: 'err', text: `${size}px: фон непрозрачный — Twitch требует прозрачный фон` }); }
+      }
+    }
     if (check.failed) { line(false, `${label}: ${check.items.filter((x) => x.level === 'err').map((x) => x.text).join('; ')}`); continue; }
     try {
       const images = Object.fromEntries(Object.entries(input.images).map(([k, b]) => [k, dataUrl(b).split(',')[1]]));
       const badge = await api('/badges', { method: 'POST', body: { ...input, images, categoryId } });
       own.push(badge);
       added++;
-      line(true, label);
+      const warns = check.items.filter((x) => x.level === 'warn').map((x) => x.text);
+      line(true, warns.length ? `${label} (! ${warns.join('; ')})` : label);
     } catch (err) { line(false, `${label}: ${err.message}`); }
   }
   await refresh();
   say(`Загружено ${added} из ${plan.length}.`, added < plan.length);
 }
-
-$('#bulkInput').addEventListener('change', (e) => { bulkImport([...e.target.files]); e.target.value = ''; });
-
-/* ---------- own category inside "Имя в чате" ---------- */
-function renderMyCategory() {
-  const has = Boolean(me.category);
-  $('#myCatCreate').hidden = has;
-  $('#myCatUpload').hidden = !has;
-  if (has) $('#myCatName').textContent = me.category.name;
-  else if (!$('#myCatInput').value) $('#myCatInput').value = profile.nick;
-}
-const idStatus = (text, isErr = false) => { const s = $('#myCatStatus'); s.textContent = text; s.classList.toggle('err', isErr); };
-$('#myCatForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const btn = e.submitter;
-  btn.disabled = true;
-  try {
-    me = await api('/me', { method: 'PUT', body: { name: $('#myCatInput').value } });
-    await refresh();
-    renderMyCategory();
-    idStatus(`Категория «${me.category.name}» создана — загрузите в неё значки.`);
-  } catch (err) { idStatus(err.message, true); } finally { btn.disabled = false; }
-});
-$('#myCatFiles').addEventListener('change', async (e) => {
-  const files = [...e.target.files];
-  e.target.value = '';
-  await bulkImport(files, $('#myCatReport'), idStatus, me.category?.id);
-  applyCollapse();
-});
-$('#myCatManage').onclick = () => { togglePopover(null); $('#openAdmin').click(); };
-$('#bulkMenuInput').addEventListener('change', (e) => {
-  const files = [...e.target.files];
-  e.target.value = '';
-  togglePopover(null);
-  $('#openAdmin').click(); // results are shown in the badge manager
-  bulkImport(files);
-});
 
 /* ---------- boot ---------- */
 document.title = `${CHANNEL} — Чат трансляции`;

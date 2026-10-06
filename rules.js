@@ -21,9 +21,10 @@ export const ROLE_SETS = ['broadcaster', 'lead_moderator', 'moderator', 'vip', '
 export const SUB_SETS = ['subscriber', 'founder'];
 export const CHANNEL_SETS = ['sub-gifter', 'sub-gift-leader', 'bits', 'bits-leader', 'predictions', 'hype-train', 'moments', 'clips-leader'];
 // Twitch shows up to 3 badges per chat line: role, subscription, and one more (drop / bits / gifts / global).
-export const SLOT_OF_UPLOAD = { sub: 'sub', drop: 'other', global: 'other' };
+export const SLOT_OF_UPLOAD = { sub: 'sub', badge: 'other', drop: 'other', global: 'other' };
 
-export const IMAGE_KEYS = { drop: ['x4'], sub: ['x1', 'x2', 'x4'], global: ['x4'] };
+// badge = a channel badge image checked against Creator Badge Drops image rules (the simple upload path)
+export const IMAGE_KEYS = { badge: ['x4'], drop: ['x4'], sub: ['x1', 'x2', 'x4'], global: ['x4'] };
 const SUB_SIZES = { x1: 18, x2: 36, x4: 72 };
 
 export function inspectPng(bytes) {
@@ -129,6 +130,12 @@ export function validateBadge(input, existing, { requireImages = true } = {}) {
     }
     if (images.x4) checkImage(c, images.x4, { maxBytes: LIMITS.dropMaxBytes, minRecommended: LIMITS.dropMinRecommended });
     badge = { kind, title, event: { name: sameEvent(existing, name)?.event.name ?? name, start, end }, unlock: { type, amount } };
+  } else if (kind === 'badge') {
+    const title = str(input.title);
+    if (!title) c.err('Укажите название значка');
+    if (title.length > LIMITS.dropNameMax) c.err(`Название длиннее ${LIMITS.dropNameMax} символов`);
+    if (images.x4) checkImage(c, images.x4, { maxBytes: LIMITS.dropMaxBytes, minRecommended: LIMITS.dropMinRecommended });
+    badge = { kind, title };
   } else if (kind === 'sub') {
     const months = Number(input.months);
     if (!SUB_MONTHS.includes(months)) c.err('Неверный стаж подписки');
@@ -176,6 +183,7 @@ export function describe(b) {
     return `Creator Badge Drop «${b.event.name}» · ${how}`;
   }
   if (b.kind === 'sub') return 'Значок подписчика';
+  if (b.kind === 'badge') return 'Значок канала';
   if (b.kind === 'twitch') return b.desc && b.desc !== b.title ? b.desc : 'Значок Twitch';
   return b.desc || 'Общий значок';
 }
