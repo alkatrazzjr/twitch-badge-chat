@@ -98,14 +98,20 @@ const routes = {
   },
 
   async 'POST /badges'(req, env, who, base) {
-    if (!who.category) throw new HttpError(403, 'Сначала создайте свою категорию');
+    const body = await readJson(req);
+    // owners upload into their own category; the site owner (admin) may upload into any category
+    let target = who.category;
+    if (who.admin && body.categoryId) {
+      target = await env.DB.prepare('SELECT id, name FROM categories WHERE id = ?').bind(String(body.categoryId)).first();
+      if (!target) throw new HttpError(404, 'Категория не найдена');
+    }
+    if (!target) throw new HttpError(403, 'Сначала создайте свою категорию');
     if (!who.admin) {
       const hourAgo = Date.now() - 3600_000;
       const n = await env.DB.prepare('SELECT COUNT(*) AS n FROM uploads WHERE ip_hash = ? AND at > ?').bind(who.ipHash, hourAgo).first('n');
       if (n >= MAX_UPLOADS_PER_IP_PER_HOUR) throw new HttpError(429, 'Слишком много загрузок, попробуйте позже');
     }
-    const body = await readJson(req);
-    const existing = await categoryBadges(env, who.category.id);
+    const existing = await categoryBadges(env, target.id);
     if (existing.length >= MAX_BADGES_PER_CATEGORY) throw new HttpError(400, `Максимум ${MAX_BADGES_PER_CATEGORY} значков в категории`);
     const images = {};
     for (const k of IMAGE_KEYS[body.kind] || []) {
@@ -119,12 +125,12 @@ const routes = {
     const now = new Date().toISOString();
     await env.DB.batch([
       env.DB.prepare('INSERT INTO badges (id, category_id, data, created_at) VALUES (?, ?, ?, ?)')
-        .bind(id, who.category.id, JSON.stringify(result.badge), now),
+        .bind(id, target.id, JSON.stringify(result.badge), now),
       ...Object.entries(images).map(([k, bytes]) => env.DB.prepare('INSERT INTO images (badge_id, key, bytes) VALUES (?, ?, ?)').bind(id, k, bytes)),
       env.DB.prepare('INSERT INTO uploads (ip_hash, at) VALUES (?, ?)').bind(who.ipHash, Date.now()),
       env.DB.prepare('DELETE FROM uploads WHERE at < ?').bind(Date.now() - 86400_000),
     ]);
-    return badgeJson({ id, category_id: who.category.id, data: JSON.stringify(result.badge), created_at: now }, base);
+    return badgeJson({ id, category_id: target.id, data: JSON.stringify(result.badge), created_at: now }, base);
   },
 
   async 'DELETE /badges/:id'(req, env, who, base, id) {

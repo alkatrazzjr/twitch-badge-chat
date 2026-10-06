@@ -320,3 +320,5 @@ svg { display: block; }
 .bulk-report { list-style: none; margin: 8px 0 0; padding: 0; font-size: 12px; max-height: 180px; overflow-y: auto; }
 .bulk-report li.ok { color: var(--ok); }
 .bulk-report li.err { color: #ff8280; }
+
+.target-box { display: flex; flex-direction: column; gap: 4px; margin-top: 14px; font-weight: 600; font-size: 13px; }

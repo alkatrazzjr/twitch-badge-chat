@@ -109,7 +109,9 @@ function byId(id) {
   return v ? twitchBadge(set, v) : null;
 }
 const categoryName = (id) => state.categories.find((c) => c.id === id)?.name ?? '—';
-const ownBadges = () => (me.category ? state.badges.filter((b) => b.categoryId === me.category.id) : []);
+// Category that uploads go to: your own, or (site owner only) the one picked in the manager.
+const targetCategoryId = () => (me.admin && $('#targetCategory').value) || me.category?.id || null;
+const ownBadges = () => state.badges.filter((b) => b.categoryId === targetCategoryId());
 
 const currentBadges = () => SLOTS.map((k) => byId(profile[k])).filter(Boolean).map(badgeView);
 
@@ -557,6 +559,13 @@ function renderManager() {
     if (document.activeElement !== $('#categoryInput')) $('#categoryInput').value = me.category.name;
   } else if (!$('#categoryInput').value) $('#categoryInput').value = profile.nick;
 
+  // site owner: choose which category uploads go to
+  const sel = $('#targetCategory');
+  const keep = sel.value;
+  sel.replaceChildren(...[...state.categories].sort((a, b) => (b.id === me.category?.id) - (a.id === me.category?.id))
+    .map((c) => el('option', { value: c.id, textContent: c.name + (c.id === me.category?.id ? ' (моя)' : '') })));
+  sel.value = state.categories.some((c) => c.id === keep) ? keep : (me.category?.id ?? sel.options[0]?.value ?? '');
+  $('#targetBox').hidden = !me.admin || !state.categories.length;
   const events = new Set(ownBadges().filter((b) => b.kind === 'drop').map((b) => b.event.name));
   $('#eventList').replaceChildren(...[...events].map((value) => el('option', { value })));
 
@@ -615,6 +624,7 @@ $('#openAdmin').onclick = () => {
   renderManager(); dialog.showModal(); refresh();
 };
 $('[data-close-dialog]').onclick = () => dialog.close();
+$('#targetCategory').addEventListener('change', renderManager);
 dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
 
 $('#categoryForm').addEventListener('submit', (e) => {
@@ -725,12 +735,12 @@ for (const form of document.querySelectorAll('.upload')) {
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     run(e.submitter, async () => {
-      if (!me.category) throw new Error('Сначала создайте свою категорию');
+      if (!targetCategoryId()) throw new Error('Сначала создайте свою категорию');
       const { input, result } = await check(true);
       if (result.failed) throw new Error('Исправьте ошибки выше');
       status('Загрузка…');
       const images = Object.fromEntries(Object.entries(input.images).map(([k, b]) => [k, dataUrl(b).split(',')[1]]));
-      const badge = await api('/badges', { method: 'POST', body: { ...input, images } });
+      const badge = await api('/badges', { method: 'POST', body: { ...input, images, categoryId: targetCategoryId() } });
       form.reset();
       if (form === dropForm) resetDropForm();
       $('.check', form).replaceChildren();
@@ -797,7 +807,7 @@ async function bulkImport(fileList) {
   const report = $('#bulkReport');
   const line = (ok, text) => report.append(el('li', { className: ok ? 'ok' : 'err', textContent: (ok ? '✓ ' : '✕ ') + text }));
   report.replaceChildren();
-  if (!me.category) { status('Сначала создайте свою категорию', true); return; }
+  if (!targetCategoryId()) { status('Сначала создайте свою категорию', true); return; }
   const files = [];
   for (const file of fileList) {
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -824,7 +834,7 @@ async function bulkImport(fileList) {
     if (check.failed) { line(false, `${label}: ${check.items.filter((x) => x.level === 'err').map((x) => x.text).join('; ')}`); continue; }
     try {
       const images = Object.fromEntries(Object.entries(input.images).map(([k, b]) => [k, dataUrl(b).split(',')[1]]));
-      const badge = await api('/badges', { method: 'POST', body: { ...input, images } });
+      const badge = await api('/badges', { method: 'POST', body: { ...input, images, categoryId: targetCategoryId() } });
       own.push(badge);
       added++;
       line(true, label);
