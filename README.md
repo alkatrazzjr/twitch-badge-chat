@@ -73,3 +73,7 @@
    ```
 
 </details>
+
+## Лицензия
+
+[MIT](LICENSE)
